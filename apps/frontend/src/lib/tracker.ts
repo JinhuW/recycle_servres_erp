@@ -210,8 +210,7 @@ export function evaluatorModelProblem(
 }
 
 // ─── LLM keys (GET /api/llm-keys) ────────────────────────────────────────────
-// The tracker calls the providers with its own keys: pasted ones the ERP
-// pushed, or its own env vars. The ERP's env keys never reach it, so its
+// The tracker calls the providers with the keys the ERP pushed to it, so its
 // model pickers go by what the tracker itself reports.
 
 /** Per provider: whether the tracker can call it; absent when it didn't say. */
@@ -238,8 +237,8 @@ export function parseTrackerKeys(body: unknown): TrackerKeyStatus {
 
 /**
  * The ERP's provider list with `configured` meaning "the tracker can call
- * it". Where the tracker didn't say (unreachable, or too old to report env
- * keys), only a key pasted here that reached the tracker counts.
+ * it". Where the tracker didn't say (unreachable, or too old to report
+ * `available`), a key saved here that reached the tracker counts.
  */
 export function trackerProviderStatus(
   erp: readonly AiProviderStatus[], tracker: TrackerKeyStatus | null,

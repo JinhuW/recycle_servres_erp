@@ -29,7 +29,7 @@ const rateLimited = createRateLimiter(60_000, 20);
 // `stage` matters more than it looks. Both failures reach the warehouse as the
 // same "scanning is unavailable" banner — nothing they can do differs — so the
 // record is the only place the two are told apart, and an operator who greps
-// this file after an R2 outage must not be sent to check OPENROUTER_API_KEY.
+// this file after an R2 outage must not be sent to check the AI keys.
 type ScanStage = 'ocr' | 'upload';
 type ScanCtx = { var: { requestId?: string }; req: { method: string; url: string } };
 function logScanFailure(
@@ -141,7 +141,7 @@ scan.post('/label', async (c) => {
   // "scan partial fill" and pull the matching image + extraction to see what
   // the OCR struggled with (e.g. speed missing on a SK Hynix SODIMM).
   // Skip the stub provider: it fills almost nothing by design, so on a deploy
-  // missing OPENROUTER_API_KEY it would log on every scan and rotate genuine
+  // with no AI key it would log on every scan and rotate genuine
   // 500 records out of the shared sink.
   const expected = EXPECTED_FIELDS_BY_CATEGORY[category];
   const missing = expected.filter((f) => !result.fields[f] || result.fields[f].trim() === '');

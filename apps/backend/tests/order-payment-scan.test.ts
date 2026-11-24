@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { resetDb, getTestDb } from './helpers/db';
 import { api, multipart } from './helpers/app';
 import { loginAs, MARCUS } from './helpers/auth';
+import { seedOpenRouterKey } from './helpers/aiKeys';
 
 // POST /api/orders/:id/status-meta/Payment/attachments?scan=paypal — the
 // cost-payment screenshot is stored as a Payment attachment and the PayPal
@@ -54,11 +55,12 @@ describe('Payment attachment with ?scan=paypal', () => {
   });
 
   it('keeps the file and answers scan: null when the OCR fails', async () => {
+    await seedOpenRouterKey();
     vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('openrouter down'); }));
     const { token } = await loginAs(MARCUS);
     const id = await createOrder(token);
     const r = await multipart(`/api/orders/${id}/status-meta/Payment/attachments?scan=paypal`,
-      { file: PNG() }, { token, env: { OPENROUTER_API_KEY: 'test-key' } });
+      { file: PNG() }, { token });
     expect(r.status).toBe(200);
     const body = r.body as Upload;
     expect(body.attachment.id).toBeTruthy();

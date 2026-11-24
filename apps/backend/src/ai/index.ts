@@ -1,6 +1,6 @@
 // Label OCR and the other image reads. Any provider in ./providers can serve
 // them, chosen per feature on Settings ▸ AI models (ai/llm.ts resolves which),
-// with keys pasted there or set in env (ai/keys.ts). With no key at all, dev
+// with keys pasted there (ai/keys.ts). With no key at all, dev
 // and CI get a deterministic stub; production refuses instead, because canned
 // data would be trusted as real readings. Real calls fail fast; the scan
 // route turns a throw into a 502 so the field user retries the shot.
@@ -21,9 +21,9 @@ export { modelHasKey, providerHasKey } from './keys';
 
 export const NO_KEY_ERROR = 'No AI provider key is set: add one on Settings ▸ AI models';
 
-function choose(env: Env, keys: AiKeys): OcrProvider {
+function choose(keys: AiKeys): OcrProvider {
   if (!AI_PROVIDERS.some((p) => keys[p])) return 'stub';
-  return parseModelRef(fallbackModel(env, keys)).provider;
+  return parseModelRef(fallbackModel(keys)).provider;
 }
 
 /**
@@ -33,7 +33,7 @@ function choose(env: Env, keys: AiKeys): OcrProvider {
  */
 export async function describeOcr(env: Env): Promise<OcrProvider | 'none'> {
   const keys = await aiKeysForHealth(env);
-  if (choose(env, keys) === 'stub') return env.NODE_ENV === 'production' ? 'none' : 'stub';
+  if (choose(keys) === 'stub') return env.NODE_ENV === 'production' ? 'none' : 'stub';
   const p = parseModelRef(await resolveModelForHealth(env, keys, { feature: 'scan' })).provider;
   return keys[p] ? p : 'none';
 }
@@ -41,7 +41,7 @@ export async function describeOcr(env: Env): Promise<OcrProvider | 'none'> {
 let warnedAboutStub = false;
 /** 'stub' when no key is set anywhere; outside production only, see featureProvider. */
 export async function pickProvider(env: Env): Promise<OcrProvider> {
-  const p = choose(env, await aiKeys(env));
+  const p = choose(await aiKeys(env));
   // Loud one-shot WARN so the dev console can't quietly swallow the fallback.
   if (p === 'stub' && !warnedAboutStub && env.NODE_ENV !== 'production') {
     warnedAboutStub = true;

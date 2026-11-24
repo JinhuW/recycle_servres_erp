@@ -27,6 +27,9 @@ const KNOWN_SETTINGS: Record<string, (v: unknown) => boolean> = {
   category_default_margin: v => typeof v === 'number' && Number.isFinite(v) && v >= 0,
   po_ai_review: isPoAiReviewSetting,
   ai_models: isAiModelsSetting,
+  // Written once by the boot import (ai/keys.ts); never by a PATCH, which
+  // could otherwise make the next boot import a removed key again.
+  ai_env_imported: () => false,
 };
 
 // Most settings expose internal pricing/margin/upload config and stay

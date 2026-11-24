@@ -47,9 +47,10 @@ export function buildEnv(src: NodeJS.ProcessEnv = process.env): Env {
   if (src.NODE_ENV === 'production' && !src.CORS_ALLOWED_ORIGINS) {
     throw new Error('CORS_ALLOWED_ORIGINS is required in production');
   }
-  // No AI key is required to boot: keys can be pasted on Settings ▸ AI
-  // models. Production never falls back to the stub's canned data; an AI
-  // read with no key anywhere fails instead (ai/index.ts).
+  // No AI key is required to boot: keys are pasted on Settings ▸ AI models,
+  // and the old AI env vars only feed the one-time import (ai/keys.ts).
+  // Production never falls back to the stub's canned data; an AI read with
+  // no key fails instead (ai/index.ts).
   // A blank variable (a Railway field emptied rather than deleted) means unset.
   const aiModel = src.AI_MODEL?.trim() || undefined;
   const ocrModel = src.OPENROUTER_OCR_MODEL?.trim() || undefined;

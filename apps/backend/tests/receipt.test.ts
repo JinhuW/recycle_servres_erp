@@ -1,6 +1,9 @@
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { normalizeAmount, buildReceiptName, suffixFilename, maybeRenameReceipt } from '../src/ai/receipt';
 import type { Env } from '../src/types';
+import { resetDb } from './helpers/db';
+import { testEnv } from './helpers/app';
+import { removeAiKeys, seedOpenRouterKey } from './helpers/aiKeys';
 
 describe('normalizeAmount', () => {
   it.each([
@@ -63,6 +66,10 @@ describe('suffixFilename', () => {
 });
 
 describe('maybeRenameReceipt', () => {
+  beforeEach(async () => {
+    await resetDb();
+    await seedOpenRouterKey('k');
+  });
   afterEach(() => vi.unstubAllGlobals());
 
   const png = () => new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'IMG_2041.png', { type: 'image/png' });
@@ -77,7 +84,7 @@ describe('maybeRenameReceipt', () => {
 
   it('renames on a clean extraction, preserving bytes and type', async () => {
     mockModel('{"method":"alipay","amount":"1250.00"}');
-    const out = await maybeRenameReceipt({ OPENROUTER_API_KEY: 'k' } as Env, png());
+    const out = await maybeRenameReceipt(testEnv, png());
     expect(out.name).toMatch(/^\d{4}-\d{2}-\d{2}-alipay-1250\.00\.png$/);
     expect(out.type).toBe('image/png');
     expect(new Uint8Array(await out.arrayBuffer())).toEqual(new Uint8Array([0x89, 0x50, 0x4e, 0x47]));
@@ -85,39 +92,40 @@ describe('maybeRenameReceipt', () => {
 
   it('re-normalizes a symbol-laden amount from the model', async () => {
     mockModel('{"method":"weixinpay","amount":"¥1,250.00"}');
-    const out = await maybeRenameReceipt({ OPENROUTER_API_KEY: 'k' } as Env, png());
+    const out = await maybeRenameReceipt(testEnv, png());
     expect(out.name).toMatch(/-weixinpay-1250\.00\.png$/);
   });
 
   it('keeps a name the scan already gave it, without reading it again', async () => {
     const fn = mockModel('{"method":"bank","amount":"9.00"}');
     const named = new File([new Uint8Array([1])], '2026-10-31-alipay-1250.00.png', { type: 'image/png' });
-    const out = await maybeRenameReceipt({ OPENROUTER_API_KEY: 'k' } as Env, named);
+    const out = await maybeRenameReceipt(testEnv, named);
     expect(out).toBe(named);
     expect(fn).not.toHaveBeenCalled();
   });
 
   it('keeps the original name when the model returns nulls', async () => {
     mockModel('{"method":null,"amount":null}');
-    const out = await maybeRenameReceipt({ OPENROUTER_API_KEY: 'k' } as Env, png());
+    const out = await maybeRenameReceipt(testEnv, png());
     expect(out.name).toBe('IMG_2041.png');
   });
 
   it('keeps the original name for a method outside the enum', async () => {
     mockModel('{"method":"wechat","amount":"1250.00"}');
-    const out = await maybeRenameReceipt({ OPENROUTER_API_KEY: 'k' } as Env, png());
+    const out = await maybeRenameReceipt(testEnv, png());
     expect(out.name).toBe('IMG_2041.png');
   });
 
   it('keeps the original name on an HTTP error', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('boom', { status: 500 })));
-    const out = await maybeRenameReceipt({ OPENROUTER_API_KEY: 'k' } as Env, png());
+    const out = await maybeRenameReceipt(testEnv, png());
     expect(out.name).toBe('IMG_2041.png');
   });
 
   it('no API key → original name and no fetch at all', async () => {
+    await removeAiKeys();
     const fn = mockModel('{"method":"alipay","amount":"1250.00"}');
-    const out = await maybeRenameReceipt({} as Env, png());
+    const out = await maybeRenameReceipt({ ...testEnv, OPENROUTER_API_KEY: 'env-only' } as Env, png());
     expect(out.name).toBe('IMG_2041.png');
     expect(fn).not.toHaveBeenCalled();
   });
@@ -125,7 +133,7 @@ describe('maybeRenameReceipt', () => {
   it('PDF → original name and no fetch at all', async () => {
     const fn = mockModel('{"method":"alipay","amount":"1250.00"}');
     const pdf = new File([new Uint8Array([0x25, 0x50, 0x44, 0x46])], 'confirmation.pdf', { type: 'application/pdf' });
-    const out = await maybeRenameReceipt({ OPENROUTER_API_KEY: 'k' } as Env, pdf);
+    const out = await maybeRenameReceipt(testEnv, pdf);
     expect(out.name).toBe('confirmation.pdf');
     expect(fn).not.toHaveBeenCalled();
   });

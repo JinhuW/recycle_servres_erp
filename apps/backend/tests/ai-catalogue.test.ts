@@ -5,6 +5,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { _resetForTests, cachedPrice, catalogue, dropCatalogue, priceFor } from '../src/ai/catalogue';
 import type { Env } from '../src/types';
+import { getTestDb, resetDb } from './helpers/db';
+import { testEnv } from './helpers/app';
+import { seedAiKey } from './helpers/aiKeys';
 
 const OPENROUTER = {
   data: [
@@ -43,7 +46,9 @@ describe('the merged catalogue', () => {
 
   it("gives an OpenAI model OpenRouter's facts for it, and leaves an unknown one text-only", async () => {
     stub();
-    const { models } = await catalogue({ OPENAI_API_KEY: 'k' } as Env);
+    await resetDb();
+    await seedAiKey(getTestDb(), testEnv, 'openai', 'k');
+    const { models } = await catalogue(testEnv);
     const byId = new Map(models.map((m) => [m.id, m]));
     expect(byId.get('openai:gpt-6-luna')).toMatchObject({
       structuredOutputs: true, inputModalities: ['text', 'image'], promptPerM: 0.2, completionPerM: 0.8, contextLength: 400000,
