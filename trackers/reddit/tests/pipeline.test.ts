@@ -7,7 +7,7 @@ import {afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi} fr
 import {createConsoleAlertSender, createTelegramAlertSender} from '../src/alerts.ts';
 import type {NewPost} from '../src/claims.ts';
 import {insertNewPosts} from '../src/claims.ts';
-import {KeyStore} from '../src/llm/keys.ts';
+import {importEnvKeys, KeyStore} from '../src/llm/keys.ts';
 import {createLogger} from '../src/logger.ts';
 import {
   evaluateOnce,
@@ -36,6 +36,9 @@ afterEach(() => {
 
 beforeEach(async () => {
   await db.sql`DELETE FROM posts`;
+  // Calls read keys only from llm_keys, where the ERP puts them.
+  await db.sql`DELETE FROM llm_keys`;
+  await db.sql`INSERT INTO llm_keys (provider, api_key) VALUES ('openrouter', 'test-key')`;
   await db.sql`DELETE FROM prompt_versions`;
   await db.sql`UPDATE settings SET value = '["chat-1"]'::jsonb
                 WHERE key = 'telegram_chat_ids'`;
@@ -48,7 +51,7 @@ function evaluateDeps(workerId = 'worker-1'): EvaluateDeps {
   return {
     sql: db.sql,
     workerId,
-    keys: new KeyStore(db.sql, {openrouter: 'test-key'}, 0),
+    keys: new KeyStore(db.sql, 0),
     settings: new SettingsStore(db.sql, 0),
     alerts: createTelegramAlertSender('bot-token'),
     logger: createLogger(workerId, 'error'),
@@ -263,19 +266,36 @@ describe('evaluateOnce', () => {
     expect(spy).toHaveBeenCalledTimes(3);
   });
 
-  it('judges with a key pushed into the store rather than the env one', async () => {
-    await db.sql`INSERT INTO llm_keys (provider, api_key) VALUES ('openrouter', 'sk-or-from-erp')`;
-    try {
-      await insertNewPosts(db.sql, [post()]);
-      const spy = stubVerdict({is_target: false, summary: 's', price: null, reasoning: 'r'});
+  it('judges with the key the ERP pushed into the store', async () => {
+    await db.sql`UPDATE llm_keys SET api_key = 'sk-or-from-erp' WHERE provider = 'openrouter'`;
+    await insertNewPosts(db.sql, [post()]);
+    const spy = stubVerdict({is_target: false, summary: 's', price: null, reasoning: 'r'});
 
-      await evaluateOnce(evaluateDeps());
+    await evaluateOnce(evaluateDeps());
 
-      const headers = (spy.mock.calls[0]![1] as RequestInit).headers as Record<string, string>;
-      expect(headers['Authorization']).toBe('Bearer sk-or-from-erp');
-    } finally {
-      await db.sql`DELETE FROM llm_keys`;
-    }
+    const headers = (spy.mock.calls[0]![1] as RequestInit).headers as Record<string, string>;
+    expect(headers['Authorization']).toBe('Bearer sk-or-from-erp');
+  });
+
+  it('judges with a key imported from env at boot, and waits once the ERP removes it', async () => {
+    await db.sql`DELETE FROM llm_keys`;
+    await db.sql`DELETE FROM llm_keys_env_imported`;
+    const quiet = createLogger('worker-1', 'error');
+    await importEnvKeys(db.sql, {openrouter: 'sk-or-from-env'}, quiet);
+    await insertNewPosts(db.sql, [post()]);
+    const spy = stubVerdict({is_target: false, summary: 's', price: null, reasoning: 'r'});
+
+    expect(await evaluateOnce(evaluateDeps())).toBe(true);
+    const headers = (spy.mock.calls[0]![1] as RequestInit).headers as Record<string, string>;
+    expect(headers['Authorization']).toBe('Bearer sk-or-from-env');
+
+    // Removed from the ERP, then a restart with the variable still set.
+    await db.sql`DELETE FROM llm_keys`;
+    await importEnvKeys(db.sql, {openrouter: 'sk-or-from-env'}, quiet);
+    resetNoKeyWarnings();
+    await insertNewPosts(db.sql, [post({redditId: 't3_b'})]);
+    expect(await evaluateOnce({...evaluateDeps(), logger: quiet})).toBe(false);
+    expect(await statusOf('t3_b')).toBe('new');
   });
 
   it('claims nothing and counts no attempt while the live model has no key', async () => {
@@ -285,7 +305,8 @@ describe('evaluateOnce', () => {
     vi.stubGlobal('fetch', spy);
     const logger = createLogger('worker-1', 'error');
     const warn = vi.spyOn(logger, 'warn');
-    const deps = {...evaluateDeps(), keys: new KeyStore(db.sql, {}, 0), logger};
+    await db.sql`DELETE FROM llm_keys`;
+    const deps = {...evaluateDeps(), logger};
 
     // Far more batches than the five attempts that used to park it 'failed'.
     for (let i = 0; i < 8; i++) expect(await evaluateOnce(deps)).toBe(false);
@@ -301,7 +322,8 @@ describe('evaluateOnce', () => {
 
     // The key lands and the same post is judged.
     stubVerdict({is_target: false, summary: 's', price: null, reasoning: 'r'});
-    expect(await evaluateOnce({...deps, keys: new KeyStore(db.sql, {openrouter: 'k'}, 0)})).toBe(true);
+    await db.sql`INSERT INTO llm_keys (provider, api_key) VALUES ('openrouter', 'k')`;
+    expect(await evaluateOnce(deps)).toBe(true);
     expect(await statusOf('t3_a')).toBe('rejected');
   });
 
@@ -310,7 +332,8 @@ describe('evaluateOnce', () => {
     const logger = createLogger('worker-1', 'error');
     const warn = vi.spyOn(logger, 'warn');
 
-    await evaluateOnce({...evaluateDeps(), keys: new KeyStore(db.sql, {}, 0), logger});
+    await db.sql`DELETE FROM llm_keys`;
+    await evaluateOnce({...evaluateDeps(), logger});
 
     expect(warn).not.toHaveBeenCalled();
   });

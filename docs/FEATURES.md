@@ -3432,8 +3432,8 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   both fields are a provider dropdown and a model dropdown, so the evaluator
   can run on Claude or OpenAI directly as well as through OpenRouter. After
   v1.475.1 a provider can be picked there only when the tracker itself holds
-  a key for it (one pasted on Settings ▸ AI models that reached it, or the
-  tracker's own env var), as the tracker reports through `GET
+  a key for it (one saved on Settings ▸ AI models that reached it; since
+  v1.479.0 the tracker reads no key from env), as the tracker reports through `GET
   /api/tracker/llm-keys`. An older or unreachable tracker counts only pasted
   keys it confirmed. When the tracker still refuses a model for want of a
   key, the dialog shows its reason under the field.
@@ -4766,29 +4766,38 @@ inventory search, sell-order draft creation.
   (OpenRouter, Anthropic for Claude, OpenAI; v1.475.0) and picks the model for label scan, receipt reading, PayPal
   screenshots and serial numbers, each with a provider dropdown and a
   model dropdown that lists only that provider's models. A row left on
-  Default uses the default model, and that falls back to the server's
-  `AI_MODEL`. A change takes effect within a minute, with no redeploy. A
+  Default uses the default model. With none chosen there, a read uses a
+  default model of the first provider with a key (v1.479.0; before, the
+  server's `AI_MODEL`). A change takes effect within a minute, with no redeploy. A
   provider without a key can't be picked. The same two dropdowns pick the
   PO AI review's model and the Reddit tracker's evaluator model, which can
   now run on Claude or OpenAI directly as well as through OpenRouter.
   - **API keys are pasted on the page** (v1.475.0). A key is tested against
     the provider before it is saved, stored encrypted, and shown again only
-    as its last four characters; Remove deletes it. A pasted key wins over
-    the server's env var, which still works as a fallback. Each save is
+    as its last four characters; Remove deletes it. Each save is
     pushed to the Reddit tracker, whose workers use it within a minute.
     Since v1.475.1 the key is stored before the push, and Remove pushes the
     removal before deleting; when the tracker can't be reached the row says
     so, the removal is remembered, and **Retry sync** pushes it again
     (`POST /api/ai/keys/:provider/sync`). Remove is refused while a model
-    picked on this page or for the PO AI review still needs that provider
-    and no env key backs it, and the message names those settings. A saved
+    picked on this page or for the PO AI review still needs that provider,
+    and the message names those settings. A saved
     key the server can't unseal (FB_POOL_KEY changed) shows as unreadable and
     counts as no key. Saving a model, the PO review's included, is refused
     when its provider has no key. Choosing a provider preselects only a model
     the row can use (one that reads images, or the evaluator's strict JSON),
     else leaves the model empty; OpenRouter's `~…-latest` aliases are not
     listed. The nightly prod→dev copy empties the pasted keys.
-  - With no key anywhere, production refuses AI reads (the scanner shows
+  - **Keys and the default model are set only on this page** (v1.479.0,
+    RS-612). The server's old `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`,
+    `OPENAI_API_KEY` and `AI_MODEL` / `OPENROUTER_OCR_MODEL` are imported
+    once, at the first boot after the upgrade: each key appears here as a
+    saved key (last four, Remove, Retry sync) and is pushed to the Reddit
+    tracker, and `AI_MODEL` fills an empty default model. After that they
+    are ignored, so a key removed here stays removed and the variables can
+    be deleted. The Reddit tracker imports its own key variables the same
+    way, once per provider.
+  - With no key saved, production refuses AI reads (the scanner shows
     its "AI recognition unavailable" message) instead of returning the
     demo stub's canned data.
 
@@ -4970,12 +4979,12 @@ inventory search, sell-order draft creation.
 
 > Which provider and model a read uses is set on Settings ▸ AI models
 > (below, v1.474.0): OpenRouter, Anthropic or OpenAI, with keys pasted there
-> or set as env vars. With no model chosen, reads use the server's
-> `AI_MODEL` (`OPENROUTER_OCR_MODEL` is still read as a fallback name), which
-> defaults to **`openai/gpt-6-luna`** through OpenRouter (v1.181.0, RS-115;
-> `google/gemini-2.5-flash` before). When that model's provider has no key,
-> reads fall back to a default model of a provider that has one
-> (`openai:gpt-6-luna`, then `anthropic:claude-sonnet-5-5`; v1.475.1). It
+> (since v1.479.0 only there). With no model chosen, reads use a default
+> model of the first provider with a key: **`openai/gpt-6-luna`** through
+> OpenRouter (v1.181.0, RS-115; `google/gemini-2.5-flash` before), else
+> `anthropic:claude-sonnet-5-5`, else `openai:gpt-6-luna`. Until v1.479.0
+> the server's `AI_MODEL` came first; it is now imported once into the
+> default model. It
 > reads 300 dpi flatbed scans reliably
 > but is weaker than Gemini on blurry/low-resolution images. With no key at
 > all, dev and CI use a deterministic stub and production refuses the read.

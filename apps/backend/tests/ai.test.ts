@@ -1,4 +1,8 @@
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
+import { resetDb, getTestDb } from './helpers/db';
+import { testEnv } from './helpers/app';
+import { seedAiKey } from './helpers/aiKeys';
+import { invalidateAiKeys } from '../src/ai/keys';
 import { parseModelJson, PROMPT_BY_CATEGORY } from '../src/ai/prompts';
 import { stubScan } from '../src/ai/stub';
 import { aiImageJson, aiScan } from '../src/ai/llm';
@@ -71,6 +75,10 @@ describe('stubScan', () => {
 });
 
 describe('aiScan', () => {
+  beforeEach(async () => {
+    await resetDb();
+    await seedAiKey(getTestDb(), testEnv, 'openrouter', 'k');
+  });
   afterEach(() => vi.unstubAllGlobals());
 
   const img = new Uint8Array([0xff, 0xd8, 0xff, 0xe0]).buffer; // JPEG magic
@@ -84,7 +92,7 @@ describe('aiScan', () => {
 
   it('parses a valid completion and reads model-reported confidence', async () => {
     mockFetch(200, { choices: [{ message: { content: '{"brand":"Samsung","capacity":"32GB","_confidence":0.72}' } }] });
-    const r = await aiScan({ OPENROUTER_API_KEY: 'k' } as Env, 'RAM', img);
+    const r = await aiScan(testEnv, 'RAM', img);
     expect(r.provider).toBe('openrouter');
     // Self-rated 0.72 exceeds the coverage floor (2/8 fields → 0.2), so it wins.
     expect(r.confidence).toBe(0.72);
@@ -93,7 +101,7 @@ describe('aiScan', () => {
 
   it('defaults confidence to 0.45 when the model omits _confidence', async () => {
     mockFetch(200, { choices: [{ message: { content: '{"brand":"Samsung"}' } }] });
-    const r = await aiScan({ OPENROUTER_API_KEY: 'k' } as Env, 'RAM', img);
+    const r = await aiScan(testEnv, 'RAM', img);
     // 1/8 RAM fields → coverage floor 0.1, default 0.45 wins. Sits just below
     // CONFIDENCE_FLOOR so the UI still surfaces a "please verify" banner.
     expect(r.confidence).toBe(0.45);
@@ -102,14 +110,14 @@ describe('aiScan', () => {
 
   it('clamps out-of-range _confidence into [0,1]', async () => {
     mockFetch(200, { choices: [{ message: { content: '{"brand":"Samsung","_confidence":1.4}' } }] });
-    const r = await aiScan({ OPENROUTER_API_KEY: 'k' } as Env, 'RAM', img);
+    const r = await aiScan(testEnv, 'RAM', img);
     expect(r.confidence).toBe(1);
     expect(r.fields._confidence).toBeUndefined();
   });
 
   it('treats a non-numeric _confidence as missing (default 0.45)', async () => {
     mockFetch(200, { choices: [{ message: { content: '{"brand":"Samsung","_confidence":"high"}' } }] });
-    const r = await aiScan({ OPENROUTER_API_KEY: 'k' } as Env, 'RAM', img);
+    const r = await aiScan(testEnv, 'RAM', img);
     expect(r.confidence).toBe(0.45);
     expect(r.fields._confidence).toBeUndefined();
   });
@@ -119,7 +127,7 @@ describe('aiScan', () => {
   it('counts only the expected fields toward the coverage floor', async () => {
     const junk = Object.fromEntries(Array.from({ length: 8 }, (_, i) => [`x${i}`, 'filler']));
     mockFetch(200, { choices: [{ message: { content: JSON.stringify({ ...junk, _confidence: 0 }) } }] });
-    const r = await aiScan({ OPENROUTER_API_KEY: 'k' } as Env, 'RAM', img);
+    const r = await aiScan(testEnv, 'RAM', img);
     expect(r.confidence).toBe(0);
   });
 
@@ -132,7 +140,7 @@ describe('aiScan', () => {
       classification: 'RDIMM', rank: '2Rx4', speed: '3200', partNumber: 'M393A4K40CB2',
       _confidence: 0.4,
     }) } }] });
-    const r = await aiScan({ OPENROUTER_API_KEY: 'k' } as Env, 'RAM', img);
+    const r = await aiScan(testEnv, 'RAM', img);
     expect(r.confidence).toBe(0.8);
   });
 
@@ -140,28 +148,29 @@ describe('aiScan', () => {
     // Model returned only 1 of 8 RAM fields but rated itself 0.92. Self-rated
     // wins — the coverage floor only acts as a lower bound.
     mockFetch(200, { choices: [{ message: { content: '{"partNumber":"M393A4K40CB2","_confidence":0.92}' } }] });
-    const r = await aiScan({ OPENROUTER_API_KEY: 'k' } as Env, 'RAM', img);
+    const r = await aiScan(testEnv, 'RAM', img);
     expect(r.confidence).toBe(0.92);
   });
 
   it('parses fenced JSON content', async () => {
     mockFetch(200, { choices: [{ message: { content: '```json\n{"brand":"Micron"}\n```' } }] });
-    const r = await aiScan({ OPENROUTER_API_KEY: 'k' } as Env, 'RAM', img);
+    const r = await aiScan(testEnv, 'RAM', img);
     expect(r.fields.brand).toBe('Micron');
   });
 
   it('throws on non-2xx (fail-fast)', async () => {
     mockFetch(500, 'upstream boom');
-    await expect(aiScan({ OPENROUTER_API_KEY: 'k' } as Env, 'RAM', img)).rejects.toThrow(/OpenRouter 500/);
+    await expect(aiScan(testEnv, 'RAM', img)).rejects.toThrow(/OpenRouter 500/);
   });
 
-  it('throws when no API key', async () => {
-    await expect(aiScan({} as Env, 'RAM', img)).rejects.toThrow(/OPENROUTER_API_KEY/);
+  it('throws when no API key, pointing to Settings ▸ AI models', async () => {
+    invalidateAiKeys();
+    await expect(aiScan({} as Env, 'RAM', img)).rejects.toThrow(/No OpenRouter API key.*Settings ▸ AI models$/);
   });
 
   it('throws when content is unparseable', async () => {
     mockFetch(200, { choices: [{ message: { content: 'no json at all' } }] });
-    await expect(aiScan({ OPENROUTER_API_KEY: 'k' } as Env, 'RAM', img)).rejects.toThrow(/parse/);
+    await expect(aiScan(testEnv, 'RAM', img)).rejects.toThrow(/parse/);
   });
 
   it('retries once when first reply is unparseable, then parses', async () => {
@@ -169,7 +178,7 @@ describe('aiScan', () => {
     vi.stubGlobal('fetch', vi.fn(async () =>
       new Response(JSON.stringify({ choices: [{ message: { content: calls.shift()! } }] }), { status: 200 }),
     ));
-    const r = await aiScan({ OPENROUTER_API_KEY: 'k' } as Env, 'RAM', img);
+    const r = await aiScan(testEnv, 'RAM', img);
     expect(r.fields.brand).toBe('Crucial');
     expect(calls.length).toBe(0);
   });
@@ -178,8 +187,12 @@ describe('aiScan', () => {
 // RS-115: the image-AI request is tuned per model family. OpenAI models only
 // read small label text reliably with detail:"high", need a little reasoning
 // room, and reject temperature; everything else keeps the pre-RS-115 request,
-// so an OPENROUTER_OCR_MODEL rollback to Gemini changes nothing but the model.
+// so switching back to Gemini changes nothing but the model.
 describe('aiImageJson request', () => {
+  beforeEach(async () => {
+    await resetDb();
+    await seedAiKey(getTestDb(), testEnv, 'openrouter', 'k');
+  });
   afterEach(() => vi.unstubAllGlobals());
 
   const img = new Uint8Array([0xff, 0xd8, 0xff, 0xe0]).buffer;
@@ -194,7 +207,7 @@ describe('aiImageJson request', () => {
 
   it('defaults to openai/gpt-6-luna with high detail, minimal reasoning, JSON mode and no temperature', async () => {
     const bodies = captureFetch(ok('{"brand":"Samsung"}'));
-    await aiImageJson({ OPENROUTER_API_KEY: 'k' } as Env, 'prompt', img);
+    await aiImageJson(testEnv, 'prompt', img);
     const [body] = bodies();
     expect(body.model).toBe('openai/gpt-6-luna');
     expect(body.max_tokens).toBe(4096);
@@ -206,8 +219,7 @@ describe('aiImageJson request', () => {
 
   it('sends the pre-RS-115 request (plus room) when overridden to a non-OpenAI model', async () => {
     const bodies = captureFetch(ok('{"brand":"Samsung"}'));
-    await aiImageJson(
-      { OPENROUTER_API_KEY: 'k', OPENROUTER_OCR_MODEL: 'google/gemini-2.5-flash' } as Env, 'prompt', img);
+    await aiImageJson(testEnv, 'prompt', img, { model: 'google/gemini-2.5-flash' });
     const [body] = bodies();
     expect(body.model).toBe('google/gemini-2.5-flash');
     expect(body.temperature).toBe(0);
@@ -219,14 +231,14 @@ describe('aiImageJson request', () => {
 
   it('asks again once when the model returns no content (budget spent thinking)', async () => {
     const bodies = captureFetch(ok('', 'length'), ok('{"brand":"Micron"}'));
-    const json = await aiImageJson({ OPENROUTER_API_KEY: 'k' } as Env, 'prompt', img);
+    const json = await aiImageJson(testEnv, 'prompt', img);
     expect(json).toEqual({ brand: 'Micron' });
     expect(bodies()).toHaveLength(2);
   });
 
   it('gives up after the second empty answer', async () => {
     captureFetch(ok('', 'length'), ok('', 'length'));
-    await expect(aiImageJson({ OPENROUTER_API_KEY: 'k' } as Env, 'prompt', img))
+    await expect(aiImageJson(testEnv, 'prompt', img))
       .rejects.toThrow(/no content/);
   });
 
@@ -238,10 +250,15 @@ describe('aiImageJson request', () => {
 });
 
 describe('pickProvider', () => {
-  it('stub when no OpenRouter key', async () => {
-    expect(await pickProvider({} as Env)).toBe('stub');
+  beforeEach(resetDb);
+  it('stub when no key is saved', async () => {
+    expect(await pickProvider(testEnv)).toBe('stub');
   });
-  it('openrouter when key present', async () => {
-    expect(await pickProvider({ OPENROUTER_API_KEY: 'k' } as Env)).toBe('openrouter');
+  it('an env key alone does not count', async () => {
+    expect(await pickProvider({ ...testEnv, OPENROUTER_API_KEY: 'k' } as Env)).toBe('stub');
+  });
+  it('openrouter when a key is saved', async () => {
+    await seedAiKey(getTestDb(), testEnv, 'openrouter', 'k');
+    expect(await pickProvider(testEnv)).toBe('openrouter');
   });
 });

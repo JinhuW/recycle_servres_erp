@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetDb, getTestDb } from './helpers/db';
 import { api, multipart } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
+import { removeAiKeys, seedOpenRouterKey } from './helpers/aiKeys';
 
 describe('commission transaction search and receipt amounts', () => {
   let alex: Awaited<ReturnType<typeof loginAs>>;
@@ -27,9 +28,10 @@ describe('commission transaction search and receipt amounts', () => {
   const model = (data: unknown) => vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
     choices: [{ message: { content: JSON.stringify(data) } }],
   }), { status: 200 })));
-  const scan = (token = alex.token) => multipart('/api/accounting/scan-receipt', { file: png() }, {
-    token, env: { OPENROUTER_API_KEY: 'test-key' },
-  });
+  const scan = async (token = alex.token) => {
+    await seedOpenRouterKey();
+    return multipart('/api/accounting/scan-receipt', { file: png() }, { token });
+  };
 
   it('reads the amount and currency before an entry exists, without saving money or evidence', async () => {
     model({ method: 'alipay', amount: '￥１，２５０', currency: 'CNY' });
@@ -49,6 +51,7 @@ describe('commission transaction search and receipt amounts', () => {
     expect((await scan()).body).toMatchObject({ receipt: { currency: null } });
     model({ method: 'bank', amount: '1.2.3', currency: 'CNY' });
     expect((await scan()).body).toEqual({ receipt: null, filename: null });
+    await removeAiKeys();
     expect((await multipart('/api/accounting/scan-receipt', { file: png() }, { token: alex.token })).body)
       .toEqual({ receipt: null, filename: null });
   });

@@ -3,6 +3,8 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { closeSharedDb } from '../../src/db';
+import { invalidateAiKeys } from '../../src/ai/keys';
+import { invalidateAiModelsSetting } from '../../src/ai/llm';
 import { adminUrl } from './pg-urls';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -151,6 +153,9 @@ export async function resetDb(): Promise<void> {
   } finally {
     await admin.end({ timeout: 5 });
   }
+  // Keys and models are cached for 30 s: a test must not see the last one's.
+  invalidateAiKeys();
+  invalidateAiModelsSetting();
   // getTestDb()/getDb() reconnect lazily to the freshly-cloned working DB.
 }
 

@@ -11,8 +11,8 @@ import { unseal } from '../lib/sealed';
 import { getWorkspaceSetting } from '../lib/settings';
 import { poAiReviewSetting } from '../services/poAiReview';
 import { catalogue, dropCatalogue } from '../ai/catalogue';
-import { envModel } from '../ai/llm';
-import { aiKeysKey, invalidateAiKeys, KEY_ENV, pushKeyToTracker, sealKey } from '../ai/keys';
+import { fallbackModel } from '../ai/llm';
+import { aiKeys, aiKeysKey, invalidateAiKeys, pushKeyToTracker, recordSync, sealKey } from '../ai/keys';
 import { PROVIDERS } from '../ai/providers';
 import type { Env, User } from '../types';
 
@@ -34,7 +34,7 @@ aiModels.get('/models', async (c) => {
   }
 });
 
-// Each provider's key status: where it comes from and its last four
+// Each provider's key status: whether one is saved, and its last four
 // characters. A key itself never leaves the backend, except to the tracker.
 // A saved key that can't be unsealed (FB_POOL_KEY rotated) serves no call, so
 // it doesn't count as configured; the row is still shown so it can be removed.
@@ -50,21 +50,21 @@ aiModels.get('/providers', async (c) => {
   const sealKeyBuf = aiKeysKey(c.env);
   const providers = AI_PROVIDERS.map((id) => {
     const row = saved.get(id);
-    const fromEnv = !!c.env[KEY_ENV[id]]?.trim();
     const readable = !!row && sealKeyBuf !== null && opens(row.sealed, sealKeyBuf);
     return {
       id,
       label: AI_PROVIDER_LABELS[id],
-      configured: readable || fromEnv,
-      source: row ? 'ui' : fromEnv ? 'env' : null,
+      configured: readable,
+      source: row ? 'ui' : null,
       last4: row?.last4 ?? null,
       // A removal the tracker hasn't confirmed leaves it holding the old key.
       trackerSynced: row ? row.tracker_synced : removing.has(id) ? false : null,
       unreadable: !!row && !readable,
-      keyName: KEY_ENV[id],
     };
   });
-  return c.json({ providers, envModel: envModel(c.env), canStore: sealKeyBuf !== null });
+  return c.json({
+    providers, fallbackModel: fallbackModel(await aiKeys(c.env)), canStore: sealKeyBuf !== null,
+  });
 });
 
 function opens(sealed: string, key: Buffer): boolean {
@@ -141,13 +141,6 @@ aiModels.put('/keys/:provider', async (c) => {
   return c.json({ ok: true, last4, ...sync });
 });
 
-// Matched on the sealed value: a save that landed meanwhile owns the flag.
-async function recordSync(sql: SqlLike, provider: AiProviderId, sealed: string, synced: boolean): Promise<void> {
-  await sql`
-    UPDATE ai_provider_keys SET tracker_synced = ${synced}
-    WHERE provider = ${provider} AND sealed = ${sealed}`;
-}
-
 aiModels.delete('/keys/:provider', async (c) => {
   const provider = providerParam(c.req.param('provider'));
   if (!provider) return c.json({ error: 'unknown provider' }, 400);
@@ -155,9 +148,8 @@ aiModels.delete('/keys/:provider', async (c) => {
   const [row] = await sql<{ provider: string }[]>`
     SELECT provider FROM ai_provider_keys WHERE provider = ${provider}`;
   // Without a key every call those settings make would fail (a scan 502s, a
-  // PO review runs without AI), so they are moved first. An env key behind
-  // the saved one keeps them working.
-  if (row && !c.env[KEY_ENV[provider]]?.trim()) {
+  // PO review runs without AI), so they are moved first.
+  if (row) {
     const users = await settingsUsing(sql, provider);
     if (users.length > 0) {
       return c.json({

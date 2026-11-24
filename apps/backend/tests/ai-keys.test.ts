@@ -8,6 +8,7 @@ import { _resetForTests } from '../src/ai/catalogue';
 import { aiImageJson } from '../src/ai/llm';
 import { describeOcr, featureProvider, NO_KEY_ERROR } from '../src/ai/index';
 import type { Env } from '../src/types';
+import { seedAiKey } from './helpers/aiKeys';
 
 const TRACKER = { TRACKER_API_URL: 'http://tracker.test', TRACKER_API_TOKEN: 'tracker-token' };
 const KEY = 'sk-ant-test-key-abcd1234';
@@ -112,7 +113,7 @@ describe('AI provider keys pasted on Settings ▸ AI models', () => {
     expect((await providers()).body.providers.find(x => x.id === 'anthropic')!.trackerSynced).toBe(false);
   });
 
-  it('wins over the env key for model calls, and removing it falls back to env', async () => {
+  it('is the only key model calls use; an env key behind it is ignored', async () => {
     const calls = stubUpstreams();
     await put(KEY);
     const env = { ...testEnv, ANTHROPIC_API_KEY: 'env-key', AI_MODEL: 'anthropic:claude-sonnet-5-5' } as Env;
@@ -125,10 +126,14 @@ describe('AI provider keys pasted on Settings ▸ AI models', () => {
     expect(del.body).toEqual({ ok: true, trackerSynced: true });
     expect(calls.some(c => c.method === 'DELETE' && c.url === 'http://tracker.test/api/llm-keys/anthropic')).toBe(true);
 
-    await aiImageJson(env, 'p', png);
-    expect(credential(calls.filter(c => c.url.includes('/v1/messages')).at(-1)!)).toBe('env-key');
-    expect((await providers({ ANTHROPIC_API_KEY: 'env-key' })).body.providers.find(x => x.id === 'anthropic'))
-      .toMatchObject({ source: 'env', last4: null });
+    await expect(aiImageJson(env, 'p', png, { model: 'anthropic:claude-sonnet-5-5' })).rejects.toThrow(/No Anthropic/);
+    const p = await providers({ ANTHROPIC_API_KEY: 'env-key' });
+    expect(p.body.providers.find(x => x.id === 'anthropic')).toEqual({
+      id: 'anthropic', label: 'Anthropic (Claude)', configured: false, source: null, last4: null,
+      trackerSynced: null, unreadable: false,
+    });
+    expect(p.body).toMatchObject({ fallbackModel: 'openai/gpt-6-luna', canStore: true });
+    expect(p.body).not.toHaveProperty('envModel');
   });
 
   // Straight after a restart nothing has read the table yet; /api/health
@@ -137,7 +142,7 @@ describe('AI provider keys pasted on Settings ▸ AI models', () => {
     stubUpstreams();
     await put(KEY);
     invalidateAiKeys();
-    expect(await describeOcr({ ...testEnv, OPENROUTER_API_KEY: undefined } as Env)).toBe('anthropic');
+    expect(await describeOcr(testEnv)).toBe('anthropic');
   });
 
   it('rejects a blank key, an unknown provider, and non-managers', async () => {
@@ -245,7 +250,7 @@ describe('AI keys and the tracker: order of writes, retries, removals', () => {
     expect((await status()).trackerSynced).toBe(true);
   });
 
-  it('refuses to remove a key a saved model still needs, unless an env key backs it', async () => {
+  it('refuses to remove a key a saved model still needs, env key or not', async () => {
     stubUpstreams();
     await put();
     await db()`
@@ -262,7 +267,11 @@ describe('AI keys and the tracker: order of writes, retries, removals', () => {
     await db()`UPDATE workspace_settings SET value = ${db().json({ default: null })} WHERE key = 'ai_models'`;
     expect((await del()).status).toBe(409);
 
-    expect((await del({ ...TRACKER, ANTHROPIC_API_KEY: 'env-key' })).status).toBe(200);
+    expect((await del({ ...TRACKER, ANTHROPIC_API_KEY: 'env-key' })).status).toBe(409);
+
+    await db()`DELETE FROM workspace_settings WHERE key = 'ai_models'`;
+    await db()`UPDATE workspace_settings SET value = ${db().json({ enabled: false, model: null })} WHERE key = 'po_ai_review'`;
+    expect((await del()).status).toBe(200);
   });
 
   it('shows a saved key it cannot unseal as not configured', async () => {
@@ -285,8 +294,14 @@ describe('PATCH /api/workspace key-checks every model it saves', () => {
     });
     expect(r.status).toBe(400);
     expect(r.body.error).toMatch(/No Anthropic \(Claude\) API key/);
-    const ok = await api('PATCH', '/api/workspace', {
+    // A key only in env no longer counts.
+    const envOnly = await api('PATCH', '/api/workspace', {
       token, env: { ANTHROPIC_API_KEY: 'k' }, body: { po_ai_review: { enabled: true, model: 'anthropic:claude-sonnet-5-5' } },
+    });
+    expect(envOnly.status).toBe(400);
+    await seedAiKey(getDb(testEnv), testEnv, 'anthropic', 'k');
+    const ok = await api('PATCH', '/api/workspace', {
+      token, body: { po_ai_review: { enabled: true, model: 'anthropic:claude-sonnet-5-5' } },
     });
     expect(ok.status).toBe(200);
     expect((await api('PATCH', '/api/workspace', { token, body: { po_ai_review: { enabled: true, model: null } } })).status).toBe(200);
@@ -294,6 +309,7 @@ describe('PATCH /api/workspace key-checks every model it saves', () => {
 });
 
 describe('production with no AI key anywhere', () => {
+  beforeEach(() => invalidateAiKeys());
   it('refuses an AI read instead of serving stub data', async () => {
     await expect(featureProvider({ NODE_ENV: 'production' } as Env, 'scan')).rejects.toThrow(NO_KEY_ERROR);
   });

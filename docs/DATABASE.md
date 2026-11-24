@@ -8,7 +8,7 @@ writes each column. Self-explanatory columns (ids, timestamps) are left blank
 on purpose. Any other blank meaning is one that neither the SQL nor the code
 made clear enough to state.
 
-**As of 2026-11-23:** ERP migration `0255`, Reddit tracker migration `0010`,
+**As of 2026-11-23:** ERP migration `0255`, Reddit tracker migration `0011`,
 Facebook tracker `0.13.18`. *Keeping this file current* at the end says how to
 refresh a section.
 
@@ -3237,7 +3237,7 @@ Workspace-wide settings as key → JSON value; managers read and change them on 
 
 | Column | Type | Not null | Default | Meaning |
 | --- | --- | :-: | --- | --- |
-| `key` | `text` | ✓ |  | Setting name. Read by the backend: target_margin (fraction; max buy = basis × (1 − it)), low_margin_floor, category_default_margin, low_health_pct, upload_max_bytes, upload_allowed_mime, public_form_daily_submissions, public_form_daily_bytes, po_ai_review, ai_models (which provider and model each AI read uses: `{default, scan, receipt, paypal, serial}`, each a model ref or null; migration-free, v1.474.0), po_company_txn_required_from, po_self_pay_chat_required_from, po_cash_shot_required_from, mcp.sellOrderCustomerId and crm.* (cadenceDays, tierFloorUsd, quietMultiple, lostMultiple). |
+| `key` | `text` | ✓ |  | Setting name. Read by the backend: target_margin (fraction; max buy = basis × (1 − it)), low_margin_floor, category_default_margin, low_health_pct, upload_max_bytes, upload_allowed_mime, public_form_daily_submissions, public_form_daily_bytes, po_ai_review, ai_models (which provider and model each AI read uses: `{default, scan, receipt, paypal, serial}`, each a model ref or null; migration-free, v1.474.0), ai_env_imported (written once by the boot import of the old AI env vars, `{providers, model, at}`; refused by PATCH, v1.479.0), po_company_txn_required_from, po_self_pay_chat_required_from, po_cash_shot_required_from, mcp.sellOrderCustomerId and crm.* (cadenceDays, tierFloorUsd, quietMultiple, lostMultiple). |
 | `value` | `jsonb` | ✓ |  | The value as JSON. The po_*_required_from keys hold the timestamp a PO rule took effect in this environment (older POs exempt; absent = rule off). |
 | `updated_at` | `timestamptz` | ✓ | `now()` |  |
 
@@ -3249,7 +3249,7 @@ Pricing and upload keys are type-checked on PATCH (upload_allowed_mime can only 
 
 #### `ai_provider_keys`
 
-AI provider API keys pasted on Settings ▸ AI models (migration 0252). A row wins over the provider's env var (`OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`); `ai/keys.ts` reads the table through a 30-second cache.
+AI provider API keys pasted on Settings ▸ AI models (migration 0252). The only source of AI keys since v1.479.0: the provider env vars (`OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) are imported once at boot (`importEnvAiSettings`, rows with a null `updated_by`) and then ignored. `ai/keys.ts` reads the table through a 30-second cache.
 
 | Column | Type | Not null | Default | Meaning |
 | --- | --- | :-: | --- | --- |
@@ -3376,7 +3376,7 @@ The Reddit tracker's own Postgres. It is the only thing the worker fleet shares.
 
 What the fleet watches and how it judges. `settings` and `rules` change only through the api (the ERP proxies a subset) and reach every worker within a minute through a 60-second cache; `subreddits` is both the watch list and the poll scheduler workers claim from.
 
-Tables: [`settings`](#reddit-settings), [`llm_keys`](#reddit-llm-keys), [`rules`](#reddit-rules), [`subreddits`](#reddit-subreddits)
+Tables: [`settings`](#reddit-settings), [`llm_keys`](#reddit-llm-keys), [`llm_keys_env_imported`](#reddit-llm-keys-env-imported), [`rules`](#reddit-rules), [`subreddits`](#reddit-subreddits)
 
 <a id="reddit-settings"></a>
 
@@ -3398,7 +3398,7 @@ Secrets never go here: `GET /api/settings` returns every row. Provider API keys 
 
 #### `llm_keys`
 
-LLM provider API keys the ERP pushes from Settings ▸ AI models (migration 0010). A row wins over the worker's env var for that provider; workers read the table through a 60-second `KeyStore` cache.
+LLM provider API keys the ERP pushes from Settings ▸ AI models (migration 0010). The only place calls read keys from; workers read the table through a 60-second `KeyStore` cache. The old `*_API_KEY` env vars are copied in once at boot (see `llm_keys_env_imported`).
 
 | Column | Type | Not null | Default | Meaning |
 | --- | --- | :-: | --- | --- |
@@ -3408,7 +3408,20 @@ LLM provider API keys the ERP pushes from Settings ▸ AI models (migration 0010
 
 - **Primary key:** `provider`
 
-Written only by `PUT`/`DELETE /api/llm-keys/:provider` (Bearer `API_TOKEN`, called server-side by the ERP). `GET /api/llm-keys` returns each provider's `configured` and `last4`, never the key.
+Written by `PUT`/`DELETE /api/llm-keys/:provider` (Bearer `API_TOKEN`, called server-side by the ERP) and by the one-time boot import. `GET /api/llm-keys` returns each provider's `configured` and `last4`, never the key.
+
+<a id="reddit-llm-keys-env-imported"></a>
+
+#### `llm_keys_env_imported`
+
+Providers whose env key the boot import (`importEnvKeys`, `src/llm/keys.ts`) has handled (migration 0011). A row stops every later import for that provider, so a key the ERP removes from `llm_keys` never comes back from a leftover env var. Written even when a stored key was already there and the env key was left unused.
+
+| Column | Type | Not null | Default | Meaning |
+| --- | --- | :-: | --- | --- |
+| `provider` | `text` | ✓ |  | openrouter, anthropic or openai. |
+| `imported_at` | `timestamptz` | ✓ | `now()` |  |
+
+- **Primary key:** `provider`
 
 <a id="reddit-rules"></a>
 

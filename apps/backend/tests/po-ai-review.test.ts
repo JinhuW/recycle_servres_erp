@@ -1,12 +1,13 @@
 // AI review of a PO: queued by the move into Reviewing (when switched on),
 // run by the background loop, answered finding by finding in Review mode.
-// The test env has no OPENROUTER_API_KEY, so the run is the deterministic
+// The test database has no AI key, so the run is the deterministic
 // part-number check alone — the model witnesses are skipped, not faked.
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { getTestDb, resetDb } from './helpers/db';
 import { api, testEnv } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
+import { seedOpenRouterKey } from './helpers/aiKeys';
 import { Budget, drainPoAiReviews } from '../src/services/poAiReview';
 
 // Decodes to Samsung 32GB DDR4 RDIMM Server 2Rx4 2400.
@@ -214,8 +215,9 @@ describe('PO AI review', () => {
     await toReviewing(id, mgr);
     const fetchSpy = vi.fn(async () => { throw new Error('no model call expected'); });
     vi.stubGlobal('fetch', fetchSpy);
+    await seedOpenRouterKey('o');
     try {
-      expect(await drainPoAiReviews(getTestDb(), { ...testEnv, OPENROUTER_API_KEY: 'o' })).toBe(1);
+      expect(await drainPoAiReviews(getTestDb(), testEnv)).toBe(1);
     } finally {
       vi.unstubAllGlobals();
     }
@@ -225,14 +227,15 @@ describe('PO AI review', () => {
   });
 
   it('validates the setting', async () => {
-    const patch = (v: unknown, env = {}) => api('PATCH', '/api/workspace', { token: mgr, env, body: { po_ai_review: v } });
+    const patch = (v: unknown) => api('PATCH', '/api/workspace', { token: mgr, body: { po_ai_review: v } });
     expect((await patch({ enabled: 'yes' })).status).toBe(400);
     expect((await patch({ enabled: true, maxCostPerPoUsd: 50 })).status).toBe(400);
     expect((await patch({ enabled: true, model: 'not a model' })).status).toBe(400);
     const ok = { enabled: true, webLookup: false, maxCostPerPoUsd: 1, model: 'openai/gpt-6-luna' };
     // A model whose provider has no key is refused too.
     expect((await patch(ok)).status).toBe(400);
-    expect((await patch(ok, { OPENROUTER_API_KEY: 'k' })).status).toBe(200);
+    await seedOpenRouterKey();
+    expect((await patch(ok)).status).toBe(200);
   });
 
   it('is manager-only', async () => {

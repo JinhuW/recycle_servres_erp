@@ -16,7 +16,7 @@ export function useAiProviders(version = 0): AiProviderStatus[] | null {
       .catch(() => {
         if (alive) {
           setList(AI_PROVIDERS.map(id => ({
-            id, label: AI_PROVIDER_LABELS[id], configured: true, source: null, last4: null, trackerSynced: null, keyName: '',
+            id, label: AI_PROVIDER_LABELS[id], configured: true, source: null, last4: null, trackerSynced: null,
           })));
         }
       });

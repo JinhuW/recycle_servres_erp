@@ -80,8 +80,8 @@ export type AiProviderStatus = {
   id: AiProviderId;
   label: string;
   configured: boolean;
-  /** 'ui': pasted on Settings ▸ AI models; 'env': the server's env var. */
-  source: 'ui' | 'env' | null;
+  /** 'ui': a key is saved on Settings ▸ AI models (pasted, or imported from the old env var). */
+  source: 'ui' | null;
   last4: string | null;
   /**
    * For a pasted key: whether the Reddit tracker has it too. For a removed
@@ -90,10 +90,10 @@ export type AiProviderStatus = {
   trackerSynced: boolean | null;
   /** A saved key this server can't unseal (FB_POOL_KEY rotated): it serves no call. */
   unreadable?: boolean;
-  keyName: string;
 };
 
-export type AiProvidersInfo = { providers: AiProviderStatus[]; envModel: string; canStore: boolean };
+/** `fallbackModel`: what a call uses when no model is picked on the page. */
+export type AiProvidersInfo = { providers: AiProviderStatus[]; fallbackModel: string; canStore: boolean };
 
 let providers: Promise<AiProvidersInfo> | null = null;
 

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { resetDb, getTestDb } from './helpers/db';
-import { api, multipart } from './helpers/app';
+import { api, multipart, testEnv } from './helpers/app';
+import { seedOpenRouterKey } from './helpers/aiKeys';
 import { loginAs, MARCUS } from './helpers/auth';
 import { maybeRenameReceipt } from '../src/ai/receipt';
 
@@ -122,13 +123,11 @@ describe('receipt auto-rename — non-image guard', () => {
   // return value alone is not enough — a failed call also returns the original
   // file — so this watches the network instead.
   it('returns a spreadsheet untouched without calling the OCR provider', async () => {
+    await seedOpenRouterKey('sk-test-should-not-be-used');
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
     try {
       const file = XLSX();
-      const out = await maybeRenameReceipt(
-        { OPENROUTER_API_KEY: 'sk-test-should-not-be-used' } as never,
-        file,
-      );
+      const out = await maybeRenameReceipt(testEnv, file);
       expect(out).toBe(file);
       expect(fetchSpy).not.toHaveBeenCalled();
     } finally {

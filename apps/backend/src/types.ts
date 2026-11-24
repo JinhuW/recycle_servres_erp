@@ -10,9 +10,9 @@ export type Env = {
   JWT_SECRET: string;
   JWT_ISSUER?: string;
   STUB_LOW_CONF?: string;
-  // AI providers: any one key turns real model calls on. Which model each
-  // feature uses is set on Settings ▸ AI models; AI_MODEL (or the older
-  // OPENROUTER_OCR_MODEL) is the default when nothing is set there.
+  // AI providers: keys and models are set on Settings ▸ AI models. These
+  // five are read only by the one-time boot import (importEnvAiSettings in
+  // ai/keys.ts) and can be deleted once it has run.
   OPENROUTER_API_KEY?: string;
   OPENROUTER_OCR_MODEL?: string;
   ANTHROPIC_API_KEY?: string;

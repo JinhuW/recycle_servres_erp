@@ -74,10 +74,12 @@ has the repo map and workflow.
   Settings ▸ AI models is the writer, through `PUT|DELETE /api/llm-keys/:provider`.
   Keys are stored in plain text, the same trust level as the Railway env
   vars, and kept out of `settings` because `GET /api/settings` returns every
-  row. `GET /api/llm-keys` shows `configured` and `last4` of the stored key
-  and whether a stored or env key is `available`; no route or log line may
-  return a key (`evaluatePost` redacts it from error messages). Env keys are
-  fallbacks a stored key overrides. A model whose provider has no key is
+  row. `GET /api/llm-keys` shows `configured`, `last4` and `available` of
+  the stored key; no route or log line may return a key (`evaluatePost`
+  redacts it from error messages). Calls read only stored keys. The
+  `*_API_KEY` env vars are copied into `llm_keys` once per provider at boot
+  (`importEnvKeys`, marked in `llm_keys_env_imported` so a key the ERP
+  removes never comes back) and are ignored after that. A model whose provider has no key is
   refused by the settings and candidate routes, and the evaluate loop claims
   nothing while the live model has none, so posts never burn attempts on it.
 
@@ -100,8 +102,8 @@ Breaking any of these breaks the fleet. The tests that cover them are
    `target` row.
 5. **Secrets in env, business config in the `settings` table.** If a change
    should reach a running fleet without a redeploy, it belongs in the database.
-   The one exception is provider API keys, which the ERP pushes into
-   `llm_keys` (env keys are fallbacks).
+   Provider API keys are not env either: the ERP pushes them into
+   `llm_keys`, and the old env vars are only imported once.
 6. **A candidate prompt never reaches buyers.** Its verdicts go to
    `candidate_verdicts` and never touch `posts.status`. A post only the
    candidate flags is reviewed in the dev chat from the evaluate loop, by the
