@@ -947,6 +947,7 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
                 if (row) setQuickView(row); else onEditItem(lotId);
               }}
               onEditLot={(lotId) => onEditItem(lotId)}
+              onEbaySent={refetchInventory}
             />
           )}
           {productsLoaded && products.length === 0 && (

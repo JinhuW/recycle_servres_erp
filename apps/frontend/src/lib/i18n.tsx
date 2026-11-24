@@ -6266,6 +6266,7 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     ebConfirmEmpty: "Nothing to confirm. Sales eBay reports show up here.",
     ebSoldEmpty: "Nothing sold on eBay yet.",
     ebPostEmpty: "Nothing waiting to be posted.",
+    ebPostEmptyHow: "Send stock from Inventory: each lot has Send to eBay in its eBay column.",
     ebLiveEmpty: "No listings live on eBay.",
     ebEndedEmpty: "No ended listings.",
     ebNoMatch: "No listings match this search.",
