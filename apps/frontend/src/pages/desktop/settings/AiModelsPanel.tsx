@@ -11,8 +11,8 @@ import { ProviderModelSelect, useAiProviders } from '../../../components/Provide
 // ─── AI models ────────────────────────────────────────────────────────────────
 // The providers' API keys, and which provider and model each image read uses.
 // A pasted key is tested, stored sealed, pushed to the Reddit tracker, and
-// shown again only as its last four characters; it wins over the server's env
-// var. Models are the `ai_models` workspace setting, read by the backend's
+// shown again only as its last four characters. Keys and models live only
+// here: the server's old env vars were imported once and are ignored. Models are the `ai_models` workspace setting, read by the backend's
 // ai/llm.ts on every call (cached ~30 s), and a draft until Save because the
 // model field takes typed ids too.
 
@@ -51,9 +51,7 @@ export function ProviderKeyRow({ p, canStore, onChanged }: {
     }
   }
 
-  const status = p.source === 'ui'
-    ? t('aiKeySetHere', { last4: p.last4 ?? '' })
-    : p.source === 'env' ? t('aiKeyFromEnv') : t('aiProviderNoKey');
+  const status = p.source === 'ui' ? t('aiKeySetHere', { last4: p.last4 ?? '' }) : t('aiProviderNoKey');
   // Read from the server unless this row's last action just answered: a
   // removal the tracker missed leaves no key row, only trackerSynced false.
   const unsynced = trackerError !== null || p.trackerSynced === false;
@@ -62,7 +60,7 @@ export function ProviderKeyRow({ p, canStore, onChanged }: {
     <div className="field" style={{ borderBottom: '1px solid var(--border)', paddingBottom: 12 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
         <strong style={{ fontSize: 13 }}>{p.label}</strong>
-        <span className={`chip ${p.configured ? 'pos' : 'muted'}`} title={p.keyName}>{status}</span>
+        <span className={`chip ${p.configured ? 'pos' : 'muted'}`}>{status}</span>
       </div>
       <div style={{ display: 'flex', gap: 8 }}>
         <input
@@ -107,7 +105,7 @@ export function AiModelsPanel() {
   const [version, setVersion] = useState(0);
   const providers = useAiProviders(version);
   const [canStore, setCanStore] = useState(true);
-  const [envModel, setEnvModel] = useState('');
+  const [fallbackModel, setFallbackModel] = useState('');
   const [saved, setSaved] = useState<AiModelsSetting>(EMPTY);
   const [draft, setDraft] = useState<AiModelsSetting>(EMPTY);
   const [saving, setSaving] = useState(false);
@@ -117,7 +115,7 @@ export function AiModelsPanel() {
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    loadAiProviders().then(r => { setEnvModel(r.envModel); setCanStore(r.canStore); }).catch(() => {});
+    loadAiProviders().then(r => { setFallbackModel(r.fallbackModel); setCanStore(r.canStore); }).catch(() => {});
     api.get<{ settings: Record<string, unknown> }>('/api/workspace')
       .then(({ settings }) => {
         const v = isAiModelsSetting(settings.ai_models) ? settings.ai_models : EMPTY;
@@ -180,7 +178,7 @@ export function AiModelsPanel() {
               value={val('default')}
               onChange={ref => set('default', ref)}
               filter={READS_IMAGES}
-              defaultLabel={t('aiUseDefaultModel', { model: envModel })}
+              defaultLabel={t('aiUseDefaultModel', { model: fallbackModel })}
               invalid={bad.includes('default')}
             />
             <div className="help">{t('aiDefaultModelHelp')}</div>

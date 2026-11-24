@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { resetDb, getTestDb } from './helpers/db';
 import { api, multipart } from './helpers/app';
 import { loginAs, ALEX } from './helpers/auth';
+import { seedOpenRouterKey } from './helpers/aiKeys';
 import { freeSellableLine } from './helpers/inventory';
 
 // Receipt auto-rename: uploads to payment-receipt statuses go through the
@@ -10,7 +11,6 @@ import { freeSellableLine } from './helpers/inventory';
 // stubbed global fetch; app.fetch and the R2 stub never touch global fetch,
 // so a strict stub is safe.
 
-const KEY = { OPENROUTER_API_KEY: 'test-key' };
 const TODAY = new Date().toISOString().slice(0, 10);
 
 const PNG = () => new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'IMG_2041.png', { type: 'image/png' });
@@ -64,6 +64,7 @@ describe('receipt auto-rename — sell orders', () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it('renames Awaiting payment and Done uploads from the model extraction', async () => {
+    await seedOpenRouterKey();
     const { token } = await loginAs(ALEX);
     const id = await createDraftSellOrder(token);
     mockModel('{"method":"alipay","amount":"1250.00"}');
@@ -71,7 +72,7 @@ describe('receipt auto-rename — sell orders', () => {
     for (const status of ['Awaiting payment', 'Done']) {
       const r = await multipart(
         `/api/sell-orders/${id}/status-meta/${encodeURIComponent(status)}/attachments`,
-        { file: PNG() }, { token, env: KEY },
+        { file: PNG() }, { token },
       );
       expect(r.status).toBe(200);
       expect(uploadedName(r)).toBe(`${TODAY}-alipay-1250.00.png`);
@@ -79,13 +80,14 @@ describe('receipt auto-rename — sell orders', () => {
   });
 
   it('Shipped keeps the original name even with a key present', async () => {
+    await seedOpenRouterKey();
     const { token } = await loginAs(ALEX);
     const id = await createDraftSellOrder(token);
     const fn = mockModel('{"method":"alipay","amount":"1250.00"}');
 
     const r = await multipart(
       `/api/sell-orders/${id}/status-meta/Shipped/attachments`,
-      { file: PNG() }, { token, env: KEY },
+      { file: PNG() }, { token },
     );
     expect(r.status).toBe(200);
     expect(uploadedName(r)).toBe('IMG_2041.png');
@@ -107,13 +109,14 @@ describe('receipt auto-rename — sell orders', () => {
   });
 
   it('PDF keeps the original name, no model call', async () => {
+    await seedOpenRouterKey();
     const { token } = await loginAs(ALEX);
     const id = await createDraftSellOrder(token);
     const fn = mockModel('{"method":"alipay","amount":"1250.00"}');
 
     const r = await multipart(
       `/api/sell-orders/${id}/status-meta/Done/attachments`,
-      { file: PDF() }, { token, env: KEY },
+      { file: PDF() }, { token },
     );
     expect(r.status).toBe(200);
     expect(uploadedName(r)).toBe('confirmation.pdf');
@@ -121,13 +124,14 @@ describe('receipt auto-rename — sell orders', () => {
   });
 
   it('unreadable receipt (model nulls) keeps the original name', async () => {
+    await seedOpenRouterKey();
     const { token } = await loginAs(ALEX);
     const id = await createDraftSellOrder(token);
     mockModel('{"method":null,"amount":null}');
 
     const r = await multipart(
       `/api/sell-orders/${id}/status-meta/Done/attachments`,
-      { file: PNG() }, { token, env: KEY },
+      { file: PNG() }, { token },
     );
     expect(r.status).toBe(200);
     expect(uploadedName(r)).toBe('IMG_2041.png');
@@ -139,6 +143,7 @@ describe('receipt auto-rename — purchase orders', () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it('renames Submission and Done uploads; DB row carries the new name', async () => {
+    await seedOpenRouterKey();
     const { token } = await loginAs(ALEX);
     const id = await createPurchaseOrder(token);
     mockModel('{"method":"zelle","amount":"¥1,980"}');
@@ -146,7 +151,7 @@ describe('receipt auto-rename — purchase orders', () => {
     for (const status of ['Submission', 'Done']) {
       const r = await multipart(
         `/api/orders/${id}/status-meta/${status}/attachments`,
-        { file: PNG() }, { token, env: KEY },
+        { file: PNG() }, { token },
       );
       expect(r.status).toBe(200);
       expect(uploadedName(r)).toBe(`${TODAY}-zelle-1980.00.png`);

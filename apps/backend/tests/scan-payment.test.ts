@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { resetDb, getTestDb } from './helpers/db';
 import { api, multipart } from './helpers/app';
 import { loginAs, ALEX, MARCUS, PRIYA } from './helpers/auth';
+import { seedOpenRouterKey } from './helpers/aiKeys';
 import { normalizePaypalTxnId, normalizeSellerName } from '../src/ai/paypal';
 
 function png(): File {
@@ -60,7 +61,8 @@ describe('POST /api/scan/payment', () => {
       ),
     );
     const { token } = await loginAs(MARCUS);
-    const r = await multipart('/api/scan/payment', { file: png() }, { token, env: { OPENROUTER_API_KEY: 'test-key' } });
+    await seedOpenRouterKey();
+    const r = await multipart('/api/scan/payment', { file: png() }, { token });
     expect(r.status).toBe(200);
     const body = r.body as { txnId: string; sellerName: string; confidence: number; provider: string };
     expect(body.provider).toBe('openrouter');
@@ -81,7 +83,8 @@ describe('POST /api/scan/payment', () => {
   it('fail-fast: OpenRouter 500 → 502', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('boom', { status: 500 })));
     const { token } = await loginAs(MARCUS);
-    const r = await multipart('/api/scan/payment', { file: png() }, { token, env: { OPENROUTER_API_KEY: 'test-key' } });
+    await seedOpenRouterKey();
+    const r = await multipart('/api/scan/payment', { file: png() }, { token });
     expect(r.status).toBe(502);
     expect((r.body as { error: string }).error).toMatch(/OCR failed/);
   });

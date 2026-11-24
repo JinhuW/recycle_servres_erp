@@ -8,7 +8,7 @@ import {analytics, ANALYTICS_WINDOWS, type AnalyticsWindow} from './analytics.ts
 import {requeuePost} from './claims.ts';
 import type {Sql} from './db.ts';
 import {DEAD_AFTER_S, STALE_AFTER_S, type LoopName, type LoopStatus} from './heartbeat.ts';
-import {invalidKeyReason, isProvider, KEY_ENV, PROVIDERS, type KeyStore} from './llm/keys.ts';
+import {invalidKeyReason, isProvider, PROVIDERS, type KeyStore} from './llm/keys.ts';
 import {isModelRef, parseModelRef} from './llm/ref.ts';
 import {candidateConfig, liveConfig, promptHash, promptStats} from './prompts.ts';
 import {createRule, deleteRule, listRules, updateRule} from './rules.ts';
@@ -324,7 +324,7 @@ export function createApi(deps: ApiDeps): Hono {
     const {provider} = parseModelRef(model);
     if ((await deps.keys.get())[provider]) return null;
     return `the tracker has no ${provider} API key for ${model}: paste one on `
-      + `Settings ▸ AI models or set ${KEY_ENV[provider]} on the tracker first`;
+      + `the ERP's Settings ▸ AI models first`;
   }
 
   app.get('/api/settings', async (c) => c.json({settings: await deps.settings.all()}));

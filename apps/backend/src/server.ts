@@ -20,6 +20,7 @@ import { startWebSubmissionPurgeLoop } from './lib/webSubmissionPurge';
 import { attachVncBridge, closeVncBridges } from './vncBridge';
 import { startMailInboxLoop } from './mail/inbox';
 import { freezeLegacySellNumbers } from './services/sellOrderNumbers';
+import { importEnvAiSettings } from './ai/keys';
 import { startPoAiReviewLoop } from './services/poAiReview';
 import { startFbPoolAliveCheckLoop } from './services/fbPoolAliveCheck';
 import { startFleetSchedulerLoop } from './fleet/scheduler';
@@ -37,6 +38,10 @@ const port = Number(process.env.PORT ?? 8787);
 // A failure stops the boot rather than serve orders that read unnumbered.
 const frozen = await freezeLegacySellNumbers(getDb(env));
 if (frozen) log.info('sell-order numbers frozen', { orders: frozen });
+
+// The old AI env vars, moved into the database once; it never throws, and
+// the tracker push it makes must not hold up the listener.
+void importEnvAiSettings(env);
 
 const loops = [
   startFxRefreshLoop(getDb(env)),

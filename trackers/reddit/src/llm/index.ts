@@ -3,7 +3,6 @@
 // model ref picks the provider (ref.ts).
 
 import {completeAnthropic} from './anthropic.ts';
-import {KEY_ENV} from './keys.ts';
 import {completeOpenAI} from './openai.ts';
 import {completeOpenRouter} from './openrouter.ts';
 import {parseModelRef, type Provider} from './ref.ts';
@@ -156,7 +155,9 @@ export async function evaluatePost(
 ): Promise<EvaluationResult> {
   const {provider, model} = parseModelRef(options.model);
   const apiKey = options.keys[provider];
-  if (!apiKey) return {kind: 'error', message: `${KEY_ENV[provider]} is not set`};
+  if (!apiKey) {
+    return {kind: 'error', message: `no ${provider} API key: paste one on the ERP's Settings ▸ AI models`};
+  }
 
   let result: CompletionResult;
   try {

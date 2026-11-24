@@ -39,7 +39,8 @@ Config files: `deploy/cloudflare/wrangler.toml` and `deploy/cloudflare/worker.js
   before running any `wrangler` commands (see [Wrangler stale token gotcha](#gotcha-1-wrangler-stale-token) below).
 - Repo-root `.env` that contains the R2 credentials (`R2_S3_ENDPOINT`,
   `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`,
-  `R2_ATTACHMENTS_PUBLIC_URL`) and `OPENROUTER_API_KEY`.
+  `R2_ATTACHMENTS_PUBLIC_URL`). AI provider keys are pasted on Settings ▸ AI
+  models after the first deploy, not set here.
 
 ---
 
@@ -87,7 +88,6 @@ secret values.
 | `CORS_ALLOWED_ORIGINS` | the Worker URL (see [URL wiring order](#url-wiring-order)) |
 | `JWT_SECRET` | generate fresh: `openssl rand -base64 48` — do not reuse prod value, do not commit |
 | `ADMIN_PASSWORD` | generate and record out-of-band — do not commit; the seeded admin is internet-reachable |
-| `OPENROUTER_API_KEY` | copy from repo-root `.env` |
 | `R2_S3_ENDPOINT` | copy from repo-root `.env` |
 | `R2_ACCESS_KEY_ID` | copy from repo-root `.env` |
 | `R2_SECRET_ACCESS_KEY` | copy from repo-root `.env` |
@@ -119,8 +119,8 @@ on the Pro plan, and a service only picks that up on a redeploy.
 
 **Why `OAUTH_SIGNING_KEY_CURRENT` is mandatory:** `env.ts` has a production boot
 guard that rejects startup unless `JWT_SECRET` is non-default, the DB password is
-not `recycle`, `CORS_ALLOWED_ORIGINS` is set, `OPENROUTER_API_KEY` is set, and
-`OAUTH_SIGNING_KEY_CURRENT` is set. Missing any one of these causes a hard crash
+not `recycle`, `CORS_ALLOWED_ORIGINS` is set, and `OAUTH_SIGNING_KEY_CURRENT`
+is set. Missing any one of these causes a hard crash
 on startup.
 
 > **Note on R2 reuse:** experiment uploads land in the same R2 bucket as

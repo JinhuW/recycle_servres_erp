@@ -3,6 +3,7 @@ import sharp from 'sharp';
 import { resetDb } from './helpers/db';
 import { api, multipart } from './helpers/app';
 import { loginAs, ALEX } from './helpers/auth';
+import { seedOpenRouterKey } from './helpers/aiKeys';
 import { shrinkImageToFit } from '../src/lib/image-shrink';
 import { freeSellableLine } from './helpers/inventory';
 
@@ -12,7 +13,6 @@ import { freeSellableLine } from './helpers/inventory';
 // safe lossy recompression for them.
 
 const TODAY = new Date().toISOString().slice(0, 10);
-const KEY = { OPENROUTER_API_KEY: 'test-key' };
 
 // Deterministic per-pixel noise defeats JPEG/PNG compression, so a small
 // canvas still produces a reliably large file.
@@ -152,6 +152,7 @@ describe('attachment upload shrink — purchase orders', () => {
   });
 
   it('runs the AI rename on the shrunk image', async () => {
+    await seedOpenRouterKey();
     const { token } = await loginAs(ALEX);
     const id = await createPurchaseOrder(token);
     expect((await api('PATCH', '/api/workspace', { token, body: { upload_max_bytes: 120_000 } })).status).toBe(200);
@@ -161,7 +162,7 @@ describe('attachment upload shrink — purchase orders', () => {
     const r = await multipart(
       `/api/orders/${id}/status-meta/Done/attachments`,
       { file: asFile(big, 'IMG_9002.jpg', 'image/jpeg') },
-      { token, env: KEY },
+      { token },
     );
     expect(r.status).toBe(200);
     const { attachment } = r.body as UploadedAttachment;

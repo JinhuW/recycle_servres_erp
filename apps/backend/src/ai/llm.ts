@@ -13,7 +13,7 @@ import { getWorkspaceSetting } from '../lib/settings';
 import { log } from '../lib/log';
 import { PROVIDERS, EmptyAnswerError, RefusalError, type AiUsage, type Turn } from './providers';
 import { priceFor } from './catalogue';
-import { aiKeys, KEY_ENV, type AiKeys } from './keys';
+import { aiKeys, type AiKeys } from './keys';
 import { PROMPT_BY_CATEGORY, parseModelJson, EXPECTED_FIELD_COUNT, EXPECTED_FIELDS_BY_CATEGORY } from './prompts';
 
 export type { AiUsage } from './providers';
@@ -26,8 +26,8 @@ const llog = log.child({ module: 'ai' });
 // (93/96 incl. 150 dpi) at ~$0.21 per 1k images and ~3.8 s; the previous
 // gemini-2.5-flash read 96/96 at ~$0.70 per 1k and ~1.6 s. Cheaper OpenAI
 // models (4o-mini, 4.1-nano, 5-nano, 5.4-nano) misread capacity/DDR/PN.
-// Switched on Settings ▸ AI models now; AI_MODEL / OPENROUTER_OCR_MODEL set
-// the fallback.
+// Switched on Settings ▸ AI models now; this is the fallback when nothing is
+// picked there.
 const DEFAULT_MODEL = 'openai/gpt-6-luna';
 // The fallback when only another provider has a key: the same model direct
 // from OpenAI, and for Claude the mid-priced current model.
@@ -93,37 +93,30 @@ async function aiModelsSetting(env: Env, { quiet = false } = {}): Promise<AiMode
     if (gen === settingGeneration) setting = { value, expiresAt: Date.now() + SETTING_TTL_MS };
     return value;
   } catch (e) {
-    // A database blip must not fail a scan that the env default can serve.
-    if (!quiet) llog.warn('could not read ai_models; using the env default', e);
+    // A database blip must not fail a scan that the fallback model can serve.
+    if (!quiet) llog.warn('could not read ai_models; using the fallback model', e);
     return setting?.value ?? { default: null };
   }
 }
 
-/** The model a call falls back to when Settings ▸ AI models names none and its key is set. */
-export function envModel(env: Env): string {
-  return env.AI_MODEL ?? env.OPENROUTER_OCR_MODEL ?? DEFAULT_MODEL;
-}
-
 /**
- * The last resort: the env model, unless only other providers have a key, in
- * which case a default model of the first of those. With no key anywhere it
- * is the env model, and the call fails naming the key it needs.
+ * The last resort when Settings ▸ AI models names no model: the default
+ * model of the first provider with a key. With no key at all it is
+ * DEFAULT_MODEL, and the call fails naming the key it needs.
  */
-export function fallbackModel(env: Env, keys: AiKeys): string {
-  const ref = envModel(env);
-  if (keys[parseModelRef(ref).provider]) return ref;
+export function fallbackModel(keys: AiKeys): string {
   const keyed = AI_PROVIDERS.find((p) => keys[p]);
-  return keyed ? PROVIDER_DEFAULT[keyed] : ref;
+  return keyed ? PROVIDER_DEFAULT[keyed] : DEFAULT_MODEL;
 }
 
-function pick(s: AiModelsSetting, env: Env, keys: AiKeys, opts: AiCallOptions): string {
-  return opts.model || (opts.feature && s[opts.feature]) || s.default || fallbackModel(env, keys);
+function pick(s: AiModelsSetting, keys: AiKeys, opts: AiCallOptions): string {
+  return opts.model || (opts.feature && s[opts.feature]) || s.default || fallbackModel(keys);
 }
 
-/** The model a call with `opts` uses: override → feature → default → env → any keyed provider. */
+/** The model a call with `opts` uses: override → feature → default → any keyed provider. */
 export async function resolveModel(env: Env, opts: AiCallOptions = {}): Promise<string> {
   if (opts.model) return opts.model;
-  return pick(await aiModelsSetting(env), env, await aiKeys(env), opts);
+  return pick(await aiModelsSetting(env), await aiKeys(env), opts);
 }
 
 /**
@@ -132,7 +125,7 @@ export async function resolveModel(env: Env, opts: AiCallOptions = {}): Promise<
  */
 export async function resolveModelForHealth(env: Env, keys: AiKeys, opts: AiCallOptions = {}): Promise<string> {
   const s = setting ? setting.value : await aiModelsSetting(env, { quiet: true });
-  return pick(s, env, keys, opts);
+  return pick(s, keys, opts);
 }
 
 /** Shrinks an image past what the providers take; anything sharp can't read goes as it is. */
@@ -188,7 +181,7 @@ export async function aiJson(
   const provider = PROVIDERS[id];
   const found = (await aiKeys(env))[id];
   if (!found) {
-    throw new Error(`No ${AI_PROVIDER_LABELS[id]} API key for ${ref}: add one on Settings ▸ AI models (or set ${KEY_ENV[id]})`);
+    throw new Error(`No ${AI_PROVIDER_LABELS[id]} API key for ${ref}: add one on Settings ▸ AI models`);
   }
   const apiKey: string = found;
   // Only the cost cap reads a price; without one, never wait for a catalogue.

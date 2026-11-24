@@ -1,7 +1,8 @@
 import type {Hono} from 'hono';
 import {afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi} from 'vitest';
 import {createApi} from '../src/api.ts';
-import {KeyStore} from '../src/llm/keys.ts';
+import {importEnvKeys, KeyStore} from '../src/llm/keys.ts';
+import {createLogger} from '../src/logger.ts';
 import {candidateConfig, ensurePromptVersion, liveConfig} from '../src/prompts.ts';
 import {SettingsStore} from '../src/settings.ts';
 import {createTestDb, type TestDb} from './helpers/db.ts';
@@ -14,8 +15,7 @@ let keys: KeyStore;
 beforeAll(async () => {
   db = await createTestDb('api');
   // A long TTL, so a test sees a stale read unless the route invalidates.
-  // An env OpenRouter key, so OpenRouter model ids pass the key check.
-  keys = new KeyStore(db.sql, {openrouter: 'env-or-key'}, 3_600_000);
+  keys = new KeyStore(db.sql, 3_600_000);
   app = createApi({
     sql: db.sql,
     settings: new SettingsStore(db.sql, 0),
@@ -41,6 +41,9 @@ beforeEach(async () => {
   await db.sql`DELETE FROM workers`;
   await db.sql`DELETE FROM rules`;
   await db.sql`DELETE FROM llm_keys`;
+  await db.sql`DELETE FROM llm_keys_env_imported`;
+  // A stored OpenRouter key, so OpenRouter model ids pass the key check.
+  await db.sql`INSERT INTO llm_keys (provider, api_key) VALUES ('openrouter', 'stored-or-key')`;
   keys.invalidate();
   await db.sql`UPDATE settings SET value = '[]'::jsonb WHERE key = 'telegram_chat_ids'`;
 });
@@ -927,7 +930,8 @@ describe('prompt scoring', () => {
     expect((await put({prompt: 'P', model: 'gpt-4o-mini'})).status).toBe(400);
     const noKey = await put({prompt: 'P', model: 'anthropic:claude-haiku-5-5'});
     expect(noKey.status).toBe(409);
-    expect((await noKey.json() as {error: string}).error).toContain('ANTHROPIC_API_KEY');
+    expect((await noKey.json() as {error: string}).error)
+      .toBe("the tracker has no anthropic API key for anthropic:claude-haiku-5-5: paste one on the ERP's Settings ▸ AI models first");
     expect((await new SettingsStore(db.sql, 0).get()).candidateEvalPrompt).toBe('');
 
     const res = await put({prompt: '  Judge bulk lots only.  ', model: 'anthropic/claude-haiku-5.5'});
@@ -1007,6 +1011,11 @@ describe('GET /api/analytics', () => {
 describe('llm keys', () => {
   const SECRET = 'sk-or-v1-0123456789abcdefSECRET-ab12';
 
+  beforeEach(async () => {
+    await db.sql`DELETE FROM llm_keys`;
+    keys.invalidate();
+  });
+
   async function putKey(provider: string, body: unknown): Promise<Response> {
     return request(`/api/llm-keys/${provider}`, {method: 'PUT', body: JSON.stringify(body)});
   }
@@ -1034,13 +1043,14 @@ describe('llm keys', () => {
     expect(after.keys.every((k) => !k.configured)).toBe(true);
   });
 
-  it('reports an env key as available without showing any of it', async () => {
+  it('reports a key imported from env like any stored key, and never shows it', async () => {
+    await importEnvKeys(db.sql, {openrouter: 'env-or-key-wxyz'}, createLogger('t', 'error'));
     const res = await request('/api/llm-keys');
     const text = await res.text();
 
     expect(text).not.toContain('env-or-key');
     expect(JSON.parse(text).keys[0]).toEqual(
-      {provider: 'openrouter', configured: false, last4: null, available: true, source: 'env'},
+      {provider: 'openrouter', configured: true, last4: 'wxyz', available: true, source: 'stored'},
     );
   });
 
@@ -1098,16 +1108,18 @@ describe('llm keys', () => {
 });
 
 describe('KeyStore', () => {
-  it('lets a stored key win over env and env fill the gaps', async () => {
-    await db.sql`INSERT INTO llm_keys (provider, api_key) VALUES ('openrouter', 'db-or')`;
-    const store = new KeyStore(db.sql, {openrouter: 'env-or', openai: 'env-oa', anthropic: ''}, 0);
+  beforeEach(async () => {
+    await db.sql`DELETE FROM llm_keys`;
+  });
 
-    expect(await store.get()).toEqual({openrouter: 'db-or', openai: 'env-oa'});
+  it('serves only stored keys', async () => {
+    await db.sql`INSERT INTO llm_keys (provider, api_key) VALUES ('openrouter', 'db-or')`;
+    expect(await new KeyStore(db.sql, 0).get()).toEqual({openrouter: 'db-or'});
   });
 
   it('serves the cached keys until invalidated', async () => {
     let now = 0;
-    const store = new KeyStore(db.sql, {}, 60_000, () => now);
+    const store = new KeyStore(db.sql, 60_000, () => now);
     expect(await store.get()).toEqual({});
 
     await db.sql`INSERT INTO llm_keys (provider, api_key) VALUES ('openai', 'db-oa')`;
@@ -1119,5 +1131,63 @@ describe('KeyStore', () => {
     await db.sql`DELETE FROM llm_keys`;
     now = 60_000;
     expect(await store.get()).toEqual({});
+  });
+});
+
+describe('importEnvKeys', () => {
+  const quiet = () => createLogger('t', 'error');
+  const stored = async () => (await db.sql<Array<{provider: string; api_key: string}>>`
+    SELECT provider, api_key FROM llm_keys ORDER BY provider`).map((r) => [r.provider, r.api_key]);
+
+  beforeEach(async () => {
+    await db.sql`DELETE FROM llm_keys`;
+    await db.sql`DELETE FROM llm_keys_env_imported`;
+  });
+
+  it('copies each env key in once, trimmed, and the store serves it', async () => {
+    expect(await importEnvKeys(db.sql, {openrouter: ' env-or ', anthropic: '', openai: 'env-oa'}, quiet()))
+      .toEqual(['openrouter', 'openai']);
+    expect(await stored()).toEqual([['openai', 'env-oa'], ['openrouter', 'env-or']]);
+    expect(await new KeyStore(db.sql, 0).get()).toEqual({openrouter: 'env-or', openai: 'env-oa'});
+  });
+
+  it('leaves a key the ERP already pushed, and still marks the provider', async () => {
+    await db.sql`INSERT INTO llm_keys (provider, api_key) VALUES ('openrouter', 'erp-or')`;
+    expect(await importEnvKeys(db.sql, {openrouter: 'env-or'}, quiet())).toEqual([]);
+    expect(await stored()).toEqual([['openrouter', 'erp-or']]);
+    expect(await db.sql`SELECT provider FROM llm_keys_env_imported`).toEqual([{provider: 'openrouter'}]);
+  });
+
+  it('never brings back a key the ERP removed', async () => {
+    await importEnvKeys(db.sql, {openrouter: 'env-or'}, quiet());
+    const del = await request('/api/llm-keys/openrouter', {method: 'DELETE'});
+    expect(del.status).toBe(200);
+
+    expect(await importEnvKeys(db.sql, {openrouter: 'env-or'}, quiet())).toEqual([]);
+    expect(await stored()).toEqual([]);
+    const listed = await (await request('/api/llm-keys')).json() as {keys: Array<{available: boolean}>};
+    expect(listed.keys[0]).toMatchObject({available: false, source: null});
+  });
+
+  it('still imports a provider a process without its key skipped', async () => {
+    // The api booted with no key, a worker with one: the worker's lands.
+    expect(await importEnvKeys(db.sql, {}, quiet())).toEqual([]);
+    expect(await importEnvKeys(db.sql, {anthropic: 'env-ant'}, quiet())).toEqual(['anthropic']);
+  });
+
+  it('skips a malformed key without saying what it was', async () => {
+    const logger = quiet();
+    const error = vi.spyOn(logger, 'error');
+    expect(await importEnvKeys(db.sql, {openai: 'sk bad key'}, logger)).toEqual([]);
+    expect(JSON.stringify(error.mock.calls)).not.toContain('sk bad key');
+    expect(await db.sql`SELECT 1 FROM llm_keys_env_imported`).toHaveLength(0);
+  });
+
+  it('never throws, so a database it cannot use does not stop the boot', async () => {
+    const logger = quiet();
+    const error = vi.spyOn(logger, 'error');
+    const broken = {begin: async () => { throw new Error('connection refused'); }} as unknown as typeof db.sql;
+    expect(await importEnvKeys(broken, {openrouter: 'env-or'}, logger)).toEqual([]);
+    expect(error).toHaveBeenCalledTimes(1);
   });
 });

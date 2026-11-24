@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { resetDb, getTestDb } from './helpers/db';
 import { api, multipart } from './helpers/app';
 import { loginAs, ALEX, SOFIA, MARCUS } from './helpers/auth';
+import { seedOpenRouterKey } from './helpers/aiKeys';
 import { mockFrankfurter } from './helpers/fx';
 
 // An RMB Flow entry's payment screenshots: stored under the name the receipt
@@ -54,8 +55,9 @@ describe('accounting entry screenshots', () => {
 
   it('stores a screenshot under the name the receipt OCR reads off it', async () => {
     readsAlipay();
+    await seedOpenRouterKey();
     const id = await record();
-    const r = await upload(id, png(), { env: { OPENROUTER_API_KEY: 'test-key' } });
+    const r = await upload(id, png());
     expect(r.status).toBe(200);
     const today = new Date().toISOString().slice(0, 10);
     const { attachment } = r.body as { attachment: Attachment };

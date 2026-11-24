@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetDb } from './helpers/db';
 import { api } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
+import { seedAiKey } from './helpers/aiKeys';
 import { _resetForTests } from '../src/routes/aiModels';
 import { invalidateAiModelsSetting, resolveModel } from '../src/ai/llm';
 import { getDb } from '../src/db';
@@ -146,8 +147,9 @@ describe('switching models (/api/ai/providers, ai_models)', () => {
 
   it('says which providers have a key, without the key', async () => {
     const { token } = await loginAs(ALEX);
+    await seedAiKey(getDb(testEnv), testEnv, 'anthropic', 'secret-a');
     const r = await api<{ providers: Array<{ id: string; configured: boolean }> }>(
-      'GET', '/api/ai/providers', { token, env: { ANTHROPIC_API_KEY: 'secret-a' } });
+      'GET', '/api/ai/providers', { token, env: { OPENROUTER_API_KEY: 'env-only' } });
     expect(r.status).toBe(200);
     expect(r.body.providers.map(p => [p.id, p.configured])).toEqual([
       ['openrouter', false], ['anthropic', true], ['openai', false],
@@ -159,12 +161,13 @@ describe('switching models (/api/ai/providers, ai_models)', () => {
 
   it('saves a per-feature model and the next call uses it', async () => {
     const { token } = await loginAs(ALEX);
-    const env = { ANTHROPIC_API_KEY: 'a', OPENROUTER_API_KEY: 'o' };
+    await seedAiKey(getDb(testEnv), testEnv, 'anthropic', 'a');
+    await seedAiKey(getDb(testEnv), testEnv, 'openrouter', 'o');
     const r = await api('PATCH', '/api/workspace', {
-      token, env, body: { ai_models: { default: 'anthropic:claude-sonnet-5-5', serial: 'openai/gpt-6-luna' } },
+      token, body: { ai_models: { default: 'anthropic:claude-sonnet-5-5', serial: 'openai/gpt-6-luna' } },
     });
     expect(r.status).toBe(200);
-    const e = { ...testEnv, ...env };
+    const e = testEnv;
     expect(await resolveModel(e, { feature: 'serial' })).toBe('openai/gpt-6-luna');
     expect(await resolveModel(e, { feature: 'scan' })).toBe('anthropic:claude-sonnet-5-5');
     expect(await resolveModel(e, { feature: 'scan', model: 'openai:gpt-x' })).toBe('openai:gpt-x');
@@ -174,8 +177,9 @@ describe('switching models (/api/ai/providers, ai_models)', () => {
 
   it('refuses a model whose provider has no key, and a malformed setting', async () => {
     const { token } = await loginAs(ALEX);
+    await seedAiKey(getDb(testEnv), testEnv, 'openrouter', 'o');
     const patch = (v: unknown) => api<{ error: string }>('PATCH', '/api/workspace', {
-      token, env: { OPENROUTER_API_KEY: 'o' }, body: { ai_models: v },
+      token, env: { ANTHROPIC_API_KEY: 'env-only' }, body: { ai_models: v },
     });
     const noKey = await patch({ default: 'anthropic:claude-sonnet-5-5' });
     expect(noKey.status).toBe(400);

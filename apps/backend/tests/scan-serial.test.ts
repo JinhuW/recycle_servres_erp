@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { resetDb } from './helpers/db';
 import { multipart } from './helpers/app';
 import { loginAs, MARCUS } from './helpers/auth';
+import { seedOpenRouterKey } from './helpers/aiKeys';
 import { normalizeSerial } from '../src/ai/serial';
 
 function jpeg(): File {
@@ -45,13 +46,13 @@ describe('POST /api/scan/serial', () => {
     const fetchMock = vi.fn(async () => reply('{"serial":"S/N: 3A12 F0C8"}'));
     vi.stubGlobal('fetch', fetchMock);
     const { token } = await loginAs(MARCUS);
-    const env = { OPENROUTER_API_KEY: 'test-key' };
-    const r = await multipart('/api/scan/serial', { file: jpeg() }, { token, env });
+    await seedOpenRouterKey();
+    const r = await multipart('/api/scan/serial', { file: jpeg() }, { token });
     expect(r.status).toBe(200);
     expect(r.body).toEqual({ serial: '3A12F0C8', provider: 'openrouter' });
 
     fetchMock.mockImplementation(async () => reply('{"serial":null}'));
-    const none = await multipart('/api/scan/serial', { file: jpeg() }, { token, env });
+    const none = await multipart('/api/scan/serial', { file: jpeg() }, { token });
     expect(none.status).toBe(200);
     expect((none.body as { serial: unknown }).serial).toBeNull();
   });

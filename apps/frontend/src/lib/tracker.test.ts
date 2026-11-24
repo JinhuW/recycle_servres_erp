@@ -103,8 +103,9 @@ describe('workerHaystack', () => {
 });
 
 describe("the tracker's own key status", () => {
-  it('reads `available` per provider, stored or env alike', () => {
+  it('reads `available` per provider, whatever the source', () => {
     expect(parseTrackerKeys({ keys: [
+      // `source: 'env'` comes from a tracker deployed before keys became UI-only.
       { provider: 'openrouter', configured: false, last4: null, available: true, source: 'env' },
       { provider: 'anthropic', configured: true, last4: 'ab12', available: true, source: 'stored' },
       { provider: 'openai', configured: false, last4: null, available: false, source: null },
@@ -119,10 +120,10 @@ describe("the tracker's own key status", () => {
   });
 
   const erp = (over: Partial<AiProviderStatus> & Pick<AiProviderStatus, 'id'>): AiProviderStatus => ({
-    label: over.id, configured: true, source: null, last4: null, trackerSynced: null, keyName: '', ...over,
+    label: over.id, configured: true, source: null, last4: null, trackerSynced: null, ...over,
   });
   const list = [
-    erp({ id: 'openrouter', source: 'env' }),
+    erp({ id: 'openrouter', source: null }),
     erp({ id: 'anthropic', source: 'ui', trackerSynced: true }),
     erp({ id: 'openai', source: 'ui', trackerSynced: false }),
   ];
@@ -132,7 +133,7 @@ describe("the tracker's own key status", () => {
       .toEqual([true, false, false]);
   });
 
-  it('falls back to a key pasted here that reached the tracker, never an ERP env key', () => {
+  it('falls back to a key saved here that reached the tracker', () => {
     expect(trackerProviderStatus(list, null).map(p => p.configured)).toEqual([false, true, false]);
     expect(trackerProviderStatus([erp({ id: 'anthropic', source: 'ui', trackerSynced: true, unreadable: true })], {})
       .map(p => p.configured)).toEqual([false]);

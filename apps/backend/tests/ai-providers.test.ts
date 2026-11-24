@@ -5,39 +5,61 @@ import { aiImageJson, aiJson, aiScan } from '../src/ai/llm';
 import { describeOcr, pickProvider } from '../src/ai/index';
 import { _resetCapsForTests } from '../src/ai/providers/anthropic';
 import { minimalReasoning } from '../src/ai/providers/openai';
-import { fallbackModel, resolveModel } from '../src/ai/llm';
+import { fallbackModel, invalidateAiModelsSetting, resolveModel } from '../src/ai/llm';
 import type { Env } from '../src/types';
+import { getTestDb, resetDb } from './helpers/db';
+import { testEnv } from './helpers/app';
+import { seedAiKey } from './helpers/aiKeys';
+
+const seed = (provider: 'openrouter' | 'anthropic' | 'openai', key = 'k') =>
+  seedAiKey(getTestDb(), testEnv, provider, key);
+
+async function saveDefaultModel(ref: string): Promise<void> {
+  await getTestDb()`
+    INSERT INTO workspace_settings (key, value) VALUES ('ai_models', ${getTestDb().json({ default: ref })})
+    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`;
+  invalidateAiModelsSetting();
+}
 
 describe('pickProvider with several providers', () => {
-  it('stub when no provider key is set at all', async () => {
-    expect(await pickProvider({ AI_MODEL: 'anthropic:claude-sonnet-5-5' } as Env)).toBe('stub');
+  beforeEach(resetDb);
+  it('stub when no provider key is saved, whatever the env says', async () => {
+    const env = { ...testEnv, ANTHROPIC_API_KEY: 'a', AI_MODEL: 'anthropic:claude-sonnet-5-5' } as Env;
+    expect(await pickProvider(env)).toBe('stub');
   });
-  it("the env default's provider when its key is set", async () => {
-    expect(await pickProvider({ ANTHROPIC_API_KEY: 'a', OPENROUTER_API_KEY: 'o', AI_MODEL: 'anthropic:claude-sonnet-5-5' } as Env))
-      .toBe('anthropic');
-  });
-  it('whichever provider has a key when the default has none', async () => {
-    expect(await pickProvider({ OPENAI_API_KEY: 'k' } as Env)).toBe('openai');
+  it('whichever provider has a key', async () => {
+    await seed('openai');
+    expect(await pickProvider(testEnv)).toBe('openai');
   });
 });
 
 // With no model chosen, calls used to go to the OpenRouter default whatever
 // keys were set, while /api/health named the provider that had one.
 describe('the fallback model', () => {
-  it("is a default of the provider that has a key when the env model's has none", async () => {
-    expect(fallbackModel({} as Env, { anthropic: 'a' })).toBe('anthropic:claude-sonnet-5-5');
-    expect(fallbackModel({} as Env, { openai: 'k' })).toBe('openai:gpt-6-luna');
-    expect(await resolveModel({ ANTHROPIC_API_KEY: 'a' } as Env, { feature: 'scan' })).toBe('anthropic:claude-sonnet-5-5');
+  beforeEach(resetDb);
+  it('is the default model of the first provider that has a key', async () => {
+    expect(fallbackModel({ anthropic: 'a' })).toBe('anthropic:claude-sonnet-5-5');
+    expect(fallbackModel({ openai: 'k' })).toBe('openai:gpt-6-luna');
+    expect(fallbackModel({ openai: 'k', openrouter: 'o' })).toBe('openai/gpt-6-luna');
+    expect(fallbackModel({})).toBe('openai/gpt-6-luna');
+    await seed('anthropic');
+    expect(await resolveModel(testEnv, { feature: 'scan' })).toBe('anthropic:claude-sonnet-5-5');
   });
-  it('stays the env model when its provider has a key, or when no provider has one', async () => {
-    expect(fallbackModel({ AI_MODEL: 'openai:gpt-6-luna' } as Env, { openai: 'k', anthropic: 'a' })).toBe('openai:gpt-6-luna');
-    expect(fallbackModel({} as Env, {})).toBe('openai/gpt-6-luna');
+  it('gives way to the default saved on Settings ▸ AI models, and ignores AI_MODEL', async () => {
+    await seed('openrouter');
+    await seed('anthropic');
+    expect(await resolveModel({ ...testEnv, AI_MODEL: 'anthropic:claude-sonnet-5-5' } as Env)).toBe('openai/gpt-6-luna');
+    await saveDefaultModel('anthropic:claude-haiku-5-5');
+    expect(await resolveModel(testEnv, { feature: 'scan' })).toBe('anthropic:claude-haiku-5-5');
   });
   it('/api/health names the provider scans actually reach', async () => {
-    expect(await describeOcr({ ANTHROPIC_API_KEY: 'a' } as Env)).toBe('anthropic');
-    expect(await describeOcr({ OPENAI_API_KEY: 'k', AI_MODEL: 'anthropic:claude-sonnet-5-5' } as Env)).toBe('openai');
     expect(await describeOcr({ NODE_ENV: 'production' } as Env)).toBe('none');
     expect(await describeOcr({} as Env)).toBe('stub');
+    await seed('anthropic');
+    expect(await describeOcr(testEnv)).toBe('anthropic');
+    await seed('openai');
+    await saveDefaultModel('anthropic:claude-sonnet-5-5');
+    expect(await describeOcr(testEnv)).toBe('anthropic');
   });
 });
 
@@ -60,11 +82,15 @@ describe('model refs', () => {
 });
 
 describe('the Anthropic provider', () => {
-  beforeEach(() => _resetCapsForTests());
+  beforeEach(async () => {
+    _resetCapsForTests();
+    await resetDb();
+    await seed('anthropic', 'a');
+  });
   afterEach(() => vi.unstubAllGlobals());
 
   const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0, 0, 0, 0]).buffer;
-  const env = { ANTHROPIC_API_KEY: 'a', AI_MODEL: 'anthropic:claude-sonnet-5-5' } as Env;
+  const env = testEnv;
   const message = (
     content: unknown[], stop = 'end_turn', usage: unknown = { input_tokens: 1000, output_tokens: 100 },
     container: unknown = null,
@@ -177,15 +203,17 @@ describe('the Anthropic provider', () => {
     expect(usage).toHaveLength(2);
   });
 
-  it('refuses to call a model without its key', async () => {
-    await expect(aiImageJson({ OPENROUTER_API_KEY: 'o' } as Env, 'p', png, { model: 'anthropic:claude-sonnet-5-5' }))
-      .rejects.toThrow(/No Anthropic \(Claude\) API key.*ANTHROPIC_API_KEY/);
+  it('refuses to call a model without its key, even with one in env', async () => {
+    await resetDb();
+    await seed('openrouter', 'o');
+    await expect(aiImageJson({ ...testEnv, ANTHROPIC_API_KEY: 'a' } as Env, 'p', png, { model: 'anthropic:claude-sonnet-5-5' }))
+      .rejects.toThrow(/^No Anthropic \(Claude\) API key for anthropic:claude-sonnet-5-5: add one on Settings ▸ AI models$/);
   });
 
-  it('a per-call model wins over the env default', async () => {
+  it('a per-call model wins over the default', async () => {
+    await seed('openrouter', 'o');
     const { urls } = capture([message([{ type: 'text', text: '{"a":1}' }])]);
-    await aiImageJson({ ANTHROPIC_API_KEY: 'a', OPENROUTER_API_KEY: 'o' } as Env, 'p', png,
-      { model: 'anthropic:claude-haiku-5-5' });
+    await aiImageJson(testEnv, 'p', png, { model: 'anthropic:claude-haiku-5-5' });
     expect(urls()[0]).toContain('api.anthropic.com');
   });
 
@@ -200,10 +228,14 @@ describe('the Anthropic provider', () => {
 });
 
 describe('the OpenAI provider', () => {
+  beforeEach(async () => {
+    await resetDb();
+    await seed('openai');
+  });
   afterEach(() => vi.unstubAllGlobals());
 
   const jpg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0]).buffer;
-  const env = { OPENAI_API_KEY: 'k', AI_MODEL: 'openai:gpt-6-luna' } as Env;
+  const env = testEnv;
   const response = (text: string) => new Response(JSON.stringify({
     id: 'resp_1', object: 'response', created_at: 0, status: 'completed', model: 'gpt-6-luna',
     output: [{
