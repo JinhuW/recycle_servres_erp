@@ -132,6 +132,39 @@ tracker, the ERP route's allowlist, the frontend client, and the ticket. Each
 side still deploys on its own, so ship the tracker side first and keep it
 backward-compatible until the ERP release reaches `main`.
 
+## Secrets and configuration: set in the UI, not in env vars
+
+A new secret, API key, model choice, threshold or other tunable is set on an
+ERP page and stored in the database. Don't add an env var for it. A manager
+can then change it without a deploy or a Railway login, and every service
+reads the same value. This holds for the trackers and the extension too: they
+take their settings from the ERP over HTTP, not from their own env.
+
+- **Plain settings** go in `workspace_settings`. Each needs a validator in
+  `KNOWN_SETTINGS` (`routes/workspace.ts`), a field on a Settings page, and a
+  cache invalidated on write, so a change applies within a minute with no
+  restart.
+- **Secrets** are sealed with `lib/sealed.ts` under their own HKDF-derived key
+  (`aiKeysKey` in `src/ai/keys.ts` is the model). The column must be named
+  `*_enc` so the nightly prod→dev scrub (`deploy/railway-sync/scrub.sql`)
+  clears it. Any other name needs its own line in `scrub.sql` and a case in
+  `tests/sync-scrub.test.ts`.
+- **What the page shows.** After saving, show only the last four characters
+  and never return the secret in clear. Test it against the provider on save
+  when that costs nothing. Refuse to remove it (409) while a setting still
+  uses it.
+- **Another service needs the secret** (a tracker, the fleet). The ERP pushes
+  it server-side, records whether the push landed, and offers a retry, as
+  `pushKeyToTracker` and `POST /api/ai/keys/:provider/sync` do. The service
+  stores it in its own database and picks it up without a restart.
+- **Env vars are only for bootstrap**: what is needed before the database can
+  be read, or to open what it holds. That means `DATABASE_URL`, `JWT_SECRET`,
+  sealing keys such as `FB_POOL_KEY`, service-to-service tokens, and what the
+  platform sets (`PORT`, `RAILWAY_*`). Everything else lives in the database.
+- **Moving an existing env-only setting** is welcome when you touch it.
+  Import the env value into the database once, let the UI value win over the
+  env var, then drop the variable.
+
 ## Git workflow
 
 - **Branches.** Branch off `origin/dev` and open the PR against `dev`. `dev` →
