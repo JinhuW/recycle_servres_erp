@@ -11,7 +11,7 @@ import type {AlertSender} from '../alerts.ts';
 import {claimPosts, recordEvaluation, rejectPost, releasePostFailure} from '../claims.ts';
 import type {Sql} from '../db.ts';
 import {evaluatePost, parseModelRef, type Evaluation, type LlmKeys} from '../llm/index.ts';
-import {KEY_ENV, type KeySource} from '../llm/keys.ts';
+import type {KeySource} from '../llm/keys.ts';
 import type {Logger} from '../logger.ts';
 import {
   candidateConfig,
@@ -65,7 +65,7 @@ function warnNoKey(logger: Logger, setting: string, model: string, now = Date.no
     setting,
     model,
     provider,
-    fix: `paste a ${provider} key on the ERP's Settings ▸ AI models, or set ${KEY_ENV[provider]}`,
+    fix: `paste a ${provider} key on the ERP's Settings ▸ AI models`,
   });
 }
 

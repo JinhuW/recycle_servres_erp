@@ -221,7 +221,7 @@ through the API — no redeploy, and changes reach every worker within 60 s.
 | --- | --- | --- |
 | `DATABASE_URL` | yes | — |
 | `TELEGRAM_BOT_TOKEN` | unless `ALERT_TRANSPORT=console` | — |
-| `OPENROUTER_API_KEY` / `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | no; fallbacks | — (keys normally come from the ERP's Settings ▸ AI models, which pushes them to `PUT /api/llm-keys/:provider`; a stored key wins over env. `PUT /api/settings/llm_model` and the prompt-candidate routes answer 409 to a model whose provider has no key anywhere; if a key is removed later, the evaluate loop claims nothing and warns every 15 minutes until one lands) |
+| `OPENROUTER_API_KEY` / `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | no; import only, deprecated | — (keys come from the ERP's Settings ▸ AI models, which pushes them to `PUT /api/llm-keys/:provider`. At boot each set variable is copied into `llm_keys` once per provider, unless a key is already stored, and is never read again: delete it once a key shows on that page. `PUT /api/settings/llm_model` and the prompt-candidate routes answer 409 to a model whose provider has no stored key; if a key is removed later, the evaluate loop claims nothing and warns every 15 minutes until one lands) |
 | `ALERT_TRANSPORT` | no | `telegram` (`console` prints alerts to stdout instead) |
 | `ROLE` | no | `worker` (`api` runs the HTTP server instead of the loops) |
 | `API_PORT` / `API_TOKEN` | api role | `8080` / — |
@@ -246,7 +246,9 @@ each post is still one LLM call (two while a candidate is on trial).
 
 Provider API keys live in `llm_keys`, written by the ERP through
 `/api/llm-keys` and read by workers through a 60 s cache, so a rotated key
-needs no restart. Env keys fill any provider with no row.
+needs no restart. Env keys are imported into it once at boot and then ignored
+(`llm_keys_env_imported` records which, so a key removed from the ERP stays
+removed).
 
 `llm_model` and `candidate_llm_model` are model refs, `<provider>:<model>`:
 `anthropic:claude-sonnet-5-5` calls Anthropic's Messages API,
@@ -316,9 +318,9 @@ Everything except `/health` and `/webhooks/redditapis` needs `Authorization: Bea
 | `DELETE` | `/api/rules/:id` | Remove one. |
 | `GET` | `/api/settings` | All runtime settings. |
 | `PUT` | `/api/settings/:key` | Change one. `{"value": …}` |
-| `GET` | `/api/llm-keys` | Per provider (`openrouter`, `anthropic`, `openai`): `configured` and `last4` of the stored key, plus `available` (a stored or env key exists, so models of that provider are accepted) and `source` (`"stored"`, `"env"` or `null`, the key calls use). Never the key itself, nor any part of an env key. |
+| `GET` | `/api/llm-keys` | Per provider (`openrouter`, `anthropic`, `openai`): `configured` and `last4` of the stored key, plus `available` (a key is stored, so models of that provider are accepted) and `source` (`"stored"` or `null`; older trackers also sent `"env"`). Never the key itself. |
 | `PUT` | `/api/llm-keys/:provider` | Store or replace a provider key. `{"key": "…"}` (trimmed, 1–500 chars, no inner whitespace or control characters). Returns `{"ok": true, "last4": "…"}`. |
-| `DELETE` | `/api/llm-keys/:provider` | Remove the stored key (the env key, if any, applies again). `{"ok": true}` even when none was stored. |
+| `DELETE` | `/api/llm-keys/:provider` | Remove the stored key. An env var does not bring it back. `{"ok": true}` even when none was stored. |
 | `GET` | `/api/stats?since` | Counts by status (only posts discovered since `since`, when given), per-subreddit health, the oldest pending post, failed posts. |
 | `POST` | `/api/posts/:id/requeue` | Retry a post that gave up. |
 | `POST` | `/api/telegram/test` | Send a test message to the configured chats. |

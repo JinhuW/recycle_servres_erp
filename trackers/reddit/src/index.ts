@@ -11,7 +11,7 @@ import {loadConfig} from './config.ts';
 import {createDb} from './db.ts';
 import {heartbeatOnce, LoopRegistry, removeWorker} from './heartbeat.ts';
 import {createLogger} from './logger.ts';
-import {KeyStore} from './llm/keys.ts';
+import {importEnvKeys, KeyStore} from './llm/keys.ts';
 import {evaluateOnce} from './loops/evaluate.ts';
 import {acquireUserSender, notifyOnce, releaseUserSender, renewUserSender} from './loops/notify.ts';
 import {pollOnce} from './loops/poll.ts';
@@ -34,11 +34,7 @@ const logger = createLogger(
 );
 const sql = createDb(config.databaseUrl);
 const settings = new SettingsStore(sql);
-const keys = new KeyStore(sql, {
-  openrouter: config.openrouterApiKey,
-  anthropic: config.anthropicApiKey,
-  openai: config.openaiApiKey,
-});
+const keys = new KeyStore(sql);
 const startedAt = Date.now();
 
 const HEARTBEAT_IDLE_MS = 30_000;
@@ -70,6 +66,11 @@ async function deregister(): Promise<void> {
 let shuttingDown = false;
 
 async function main(): Promise<void> {
+  await importEnvKeys(sql, {
+    openrouter: config.openrouterApiKey,
+    anthropic: config.anthropicApiKey,
+    openai: config.openaiApiKey,
+  }, logger.child('llm-keys'));
   if (config.role === 'api') {
     await runApi();
     return;

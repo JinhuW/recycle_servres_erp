@@ -246,11 +246,11 @@ describe('evaluatePost provider routing', () => {
     vi.stubGlobal('fetch', spy);
 
     expect(await evaluatePost(POST, {...OPTIONS, model: 'anthropic:claude-sonnet-5-5'}))
-      .toEqual({kind: 'error', message: 'ANTHROPIC_API_KEY is not set'});
+      .toEqual({kind: 'error', message: "no anthropic API key: paste one on the ERP's Settings ▸ AI models"});
     expect(await evaluatePost(POST, {...OPTIONS, model: 'openai:gpt-6-luna'}))
-      .toEqual({kind: 'error', message: 'OPENAI_API_KEY is not set'});
+      .toEqual({kind: 'error', message: "no openai API key: paste one on the ERP's Settings ▸ AI models"});
     expect(await evaluatePost(POST, {...OPTIONS, keys: {openrouter: ''}}))
-      .toEqual({kind: 'error', message: 'OPENROUTER_API_KEY is not set'});
+      .toEqual({kind: 'error', message: "no openrouter API key: paste one on the ERP's Settings ▸ AI models"});
     expect(spy).not.toHaveBeenCalled();
   });
 

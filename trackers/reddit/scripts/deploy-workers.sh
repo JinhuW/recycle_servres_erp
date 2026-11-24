@@ -27,12 +27,9 @@ source "$SECRETS"
 : "${GHCR_USERNAME:?set in secrets.env}" "${GHCR_READ_TOKEN:?set in secrets.env}"
 
 # The env file the workers run with. WORKER_ID stays unset (auto per process).
-# Provider keys are optional: the ERP pushes keys into the database
-# (llm_keys), and an env key only fills a provider without a stored one.
+# No provider keys: the ERP pushes them into the database (llm_keys), and
+# the workers read them only from there.
 ENV_CONTENT="DATABASE_URL=${DATABASE_URL}
-OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
-ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-OPENAI_API_KEY=${OPENAI_API_KEY:-}
 ROLE=worker
 ALERT_TRANSPORT=${ALERT_TRANSPORT:-console}
 TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}

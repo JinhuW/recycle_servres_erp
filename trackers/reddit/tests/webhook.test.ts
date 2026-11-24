@@ -133,7 +133,7 @@ describe('POST /webhooks/redditapis', () => {
       ...(logger ? {logger} : {}),
       sql: db.sql,
       settings: new SettingsStore(db.sql, 0),
-      keys: new KeyStore(db.sql, {}, 0),
+      keys: new KeyStore(db.sql, 0),
       botToken: 'bot-token',
       apiToken: TOKEN,
       workerId: 'test-worker',
