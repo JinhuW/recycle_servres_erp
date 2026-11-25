@@ -7,7 +7,7 @@ priority: P2
 created: 2026-11-25
 reporter: jinhu
 branch: fix/label-printer-cross-tab
-pr:
+pr: https://github.com/JinhuW/recycle_servres_erp/pull/1265
 version: 1.483.0
 related: []
 ---
