@@ -317,6 +317,7 @@ Everything except `/health` and `/webhooks/redditapis` needs `Authorization: Bea
 | `PATCH` | `/api/rules/:id` | Change `name`, `prompt` or `enabled`. |
 | `DELETE` | `/api/rules/:id` | Remove one. |
 | `GET` | `/api/settings` | All runtime settings. |
+| `GET` | `/api/settings/:key` | One setting, `{"key", "value"}`. |
 | `PUT` | `/api/settings/:key` | Change one. `{"value": …}` |
 | `GET` | `/api/llm-keys` | Per provider (`openrouter`, `anthropic`, `openai`): `configured` and `last4` of the stored key, plus `available` (a key is stored, so models of that provider are accepted) and `source` (`"stored"` or `null`; older trackers also sent `"env"`). Never the key itself. |
 | `PUT` | `/api/llm-keys/:provider` | Store or replace a provider key. `{"key": "…"}` (trimmed, 1–500 chars, no inner whitespace or control characters). Returns `{"ok": true, "last4": "…"}`. |
@@ -386,6 +387,11 @@ fleet to the "Homelab Alerts" Telegram group through the ops alert relay
 
   An iteration fails when it throws or logs a warn/error, so a dead
   OpenRouter key or a Reddit block counts, not just a crash.
+  - "evaluation stalled" when a post discovered after the newest judged one
+    has waited longer than `eval_stall_alert_min` (default 60, 0 is off;
+    set on the ERP's Reddit page, Workflow ▸ Evaluate), then "resumed". A
+    failing loop misses a dead key while posts trickle in: an iteration
+    with nothing to claim is clean, so the streak restarts between posts.
 - **Reddit · Errors**: every warn/error line from every process, as one
   digest per minute grouped by message, with a count and the workers it came
   from.
