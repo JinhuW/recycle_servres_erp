@@ -2,12 +2,12 @@
 id: RS-614
 title: Reddit evaluation stall alert, threshold set in the ERP
 type: story
-status: in-review
+status: done
 priority: P2
 created: 2026-11-24
 reporter: jinhu
 branch: feat/reddit-eval-stall-alert
-pr:
+pr: 1259
 version: 1.481.0
 related: [RS-612]
 ---
