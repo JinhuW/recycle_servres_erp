@@ -266,9 +266,12 @@ the `recycle-erp-backend` job. Grafana's `recycle-erp` dashboard draws it.
   secret. The backend then wants `Authorization: Bearer $METRICS_TOKEN`, set on
   the Railway `backend` service of each environment. In production an unset
   token answers 404; elsewhere it leaves `/metrics` open for local work.
-  Prometheus reads the token from `/srv/homelab_monitoring/secrets/erp_metrics_token`
-  on `10.10.60.5`, outside the rsynced config tree. Rotating it means a new
-  Railway variable, which redeploys, and the same file.
+  Prometheus reads it from `config/prometheus/erp_metrics_token.secret` (dev:
+  `erp_metrics_token_dev.secret`) under `/srv/homelab_monitoring` on
+  `10.10.60.5`. The files exist only on the host: `*.secret` is gitignored and
+  kept out of the rsync's `--delete`. Rotating means a new Railway variable,
+  which redeploys, then the same file and `POST /-/reload` to Prometheus. Dev
+  is scraped as `recycle-erp-backend-dev`.
 - **Series.** `http_request_duration_seconds` and `http_requests_total` by method,
   matched route and status; `web_page_{load,lcp,ttfb}_seconds` by shell and page.
   Every series carries `release`. Counters restart on each deploy, which `rate()`
