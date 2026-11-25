@@ -173,6 +173,8 @@ describe('reconnecting the label printer', () => {
       setItem: (k: string, v: string) => { saved.set(k, v); },
       removeItem: (k: string) => { saved.delete(k); },
     });
+    // One tab: nothing to hear from another.
+    vi.stubGlobal('BroadcastChannel', undefined);
   });
   afterEach(() => {
     vi.useRealTimers();
@@ -327,5 +329,200 @@ describe('reconnecting the label printer', () => {
     const printer = await load({ requestDevice: vi.fn(), getDevices: async () => [new FakePrinter('4FD1')] });
     await printer.resume();
     expect(printer.status().state).toBe('off');
+  });
+});
+
+// Tabs of one browser: a lock manager and a channel they share, as Chrome's.
+class FakeLocks {
+  private holder: { done: (v: unknown) => void; fail: (e: Error) => void } | null = null;
+  private waiting: (() => void)[] = [];
+  request(_name: string, opts: { steal?: boolean; signal?: AbortSignal }, cb: () => Promise<unknown>): Promise<unknown> {
+    return new Promise((resolve, reject) => {
+      const grant = () => {
+        const h = { done: resolve, fail: reject };
+        this.holder = h;
+        void Promise.resolve(cb()).then(v => {
+          if (this.holder !== h) return;
+          this.holder = null;
+          resolve(v);
+          this.waiting.shift()?.();
+        });
+      };
+      if (opts.steal) {
+        this.holder?.fail(new DOMException('stolen', 'AbortError'));
+        grant();
+      } else if (!this.holder) grant();
+      else {
+        this.waiting.push(grant);
+        opts.signal?.addEventListener('abort', () => {
+          this.waiting = this.waiting.filter(g => g !== grant);
+          reject(new DOMException('aborted', 'AbortError'));
+        });
+      }
+    });
+  }
+  // The holding tab closed.
+  dropHolder() {
+    this.holder = null;
+    this.waiting.shift()?.();
+  }
+}
+
+class FakeChannel extends EventTarget {
+  static open: FakeChannel[] = [];
+  constructor(public name: string) { super(); FakeChannel.open.push(this); }
+  postMessage(data: unknown) {
+    for (const c of FakeChannel.open) {
+      if (c === this || c.name !== this.name) continue;
+      const copy = structuredClone(data);
+      setTimeout(() => { if (FakeChannel.open.includes(c)) c.dispatchEvent(new MessageEvent('message', { data: copy })); }, 0);
+    }
+  }
+  close() { FakeChannel.open = FakeChannel.open.filter(c => c !== this); }
+}
+
+describe('the label printer across tabs', () => {
+  let saved: Map<string, string>;
+  let locks: FakeLocks;
+  const tab = async () => {
+    vi.resetModules();
+    const printer = (await import('./labelPrinter')).labelPrinter;
+    const unsubscribe = printer.subscribe(() => {});
+    const channel = FakeChannel.open.at(-1)!;
+    // Hello, and the owner's answer.
+    await vi.advanceTimersByTimeAsync(10);
+    return { printer, unsubscribe, close: () => channel.close() };
+  };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    saved = new Map();
+    locks = new FakeLocks();
+    FakeChannel.open = [];
+    vi.stubGlobal('localStorage', {
+      getItem: (k: string) => saved.get(k) ?? null,
+      setItem: (k: string, v: string) => { saved.set(k, v); },
+      removeItem: (k: string) => { saved.delete(k); },
+    });
+    vi.stubGlobal('BroadcastChannel', FakeChannel);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  // A printer that, like a real one, stops advertising while it has a connection.
+  const setup = () => {
+    const p = new FakePrinter('4FD1');
+    p.watchAdvertisements = ({ signal }) => {
+      const id = setInterval(() => { if (!p.gatt.connected) p.dispatchEvent(new Event('advertisementreceived')); }, 500);
+      signal.addEventListener('abort', () => clearInterval(id));
+      return Promise.resolve();
+    };
+    vi.stubGlobal('navigator', { locks, bluetooth: { requestDevice: vi.fn(async () => p), getDevices: async () => [p] } });
+    return p;
+  };
+
+  it('shows a printer another tab has on, and prints through that tab', async () => {
+    const p = setup();
+    const a = await tab();
+    await a.printer.connect();
+    const b = await tab();
+    // As the page does: a wait on the lock that settles once B owns the printer.
+    void b.printer.resume();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(b.printer.status()).toMatchObject({ state: 'on', name: 'CT221D-4FD1' });
+
+    const out = b.printer.print(new Uint8Array(200).fill(7));
+    await vi.advanceTimersByTimeAsync(100);
+    await out;
+    expect(p.writes.map(w => w[0])).toEqual([7, 7]);
+    expect(p.connects).toBe(1);
+  });
+
+  it('keeps two tabs\' labels from interleaving', async () => {
+    const p = setup();
+    const a = await tab();
+    await a.printer.connect();
+    const b = await tab();
+    const both = Promise.all([
+      a.printer.print(new Uint8Array(300).fill(1)),
+      b.printer.print(new Uint8Array(300).fill(2)),
+      a.printer.print(new Uint8Array(300).fill(3)),
+    ]);
+    await vi.advanceTimersByTimeAsync(500);
+    await both;
+    expect(p.overlapped).toBe(false);
+    // In the order they reach the owner, each job whole: B's comes over the channel.
+    expect(p.writes.map(w => w[0])).toEqual([1, 1, 1, 3, 3, 3, 2, 2, 2]);
+  });
+
+  it('lets a waiting tab take the printer over when the owner closes', async () => {
+    const p = setup();
+    const a = await tab();
+    await a.printer.connect();
+    const b = await tab();
+    // As the page does: a wait on the lock that settles once B owns the printer.
+    void b.printer.resume();
+    await vi.advanceTimersByTimeAsync(10);
+
+    // A label B handed to A when A closed is lost, and B says so.
+    p.connectMs = 50;
+    const lost = b.printer.print(new Uint8Array(10)).catch((e: Error) => e.message);
+    a.close();
+    p.gatt.disconnect();
+    locks.dropHolder();
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(await lost).toBe('disconnected');
+    expect(b.printer.status()).toMatchObject({ state: 'on', name: 'CT221D-4FD1' });
+    const out = b.printer.print(new Uint8Array(10).fill(5));
+    await vi.advanceTimersByTimeAsync(50);
+    await out;
+    expect(p.writes.at(-1)![0]).toBe(5);
+  });
+
+  it('forgets the printer in every tab on Disconnect in any of them', async () => {
+    setup();
+    const a = await tab();
+    await a.printer.connect();
+    const b = await tab();
+    // As the page does: a wait on the lock that settles once B owns the printer.
+    void b.printer.resume();
+    await vi.advanceTimersByTimeAsync(10);
+
+    b.printer.disconnect();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(a.printer.status()).toMatchObject({ state: 'off', name: null });
+    expect(b.printer.status()).toMatchObject({ state: 'off', name: null });
+    expect(saved.size).toBe(0);
+    // B got the lock A let go of, found nothing to wait for, and let it go too.
+    const c = await tab();
+    await c.printer.connect();
+    expect(c.printer.status().state).toBe('on');
+  });
+
+  it('takes the printer from a tab still waiting for it on Connect', async () => {
+    const p = setup();
+    const a = await tab();
+    await a.printer.connect();
+    p.failures = 99;
+    p.drop();
+    await vi.advanceTimersByTimeAsync(0);
+    const b = await tab();
+    expect(b.printer.status().state).toBe('waiting');
+
+    p.failures = 0;
+    await b.printer.connect();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(b.printer.status()).toMatchObject({ state: 'on', name: 'CT221D-4FD1' });
+    expect(a.printer.status()).toMatchObject({ state: 'on', name: 'CT221D-4FD1' });
+    // A stopped trying, and prints through B.
+    const tries = p.connects;
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(p.connects).toBe(tries);
+    const out = a.printer.print(new Uint8Array(10).fill(9));
+    await vi.advanceTimersByTimeAsync(50);
+    await out;
+    expect(p.writes.at(-1)![0]).toBe(9);
   });
 });

@@ -2387,6 +2387,14 @@ the Sold flag beside its stage (v1.246.0); nothing about its lines changes. Line
       still picks another printer, and Disconnect ends the wait and forgets
       the printer. A printer that comes back without a port the page knows
       is forgotten rather than waited for (v1.332.2).
+    - **Tabs share the printer** (v1.483.0, RS-617). One tab owns the
+      connection and the others follow it: they show its status, and their
+      labels and status checks go through it, queued with its own, so jobs
+      from two tabs never interleave. When the owning tab closes, a tab that
+      was following connects the remembered printer by itself. Disconnect in
+      any tab forgets it in all of them, and Connect in a tab takes it over
+      from a tab still waiting for it. Until then a second tab sat on
+      *Waiting for <name>*, because a connected printer stops advertising.
     - A label asked for while the printer is *Connecting…* waits for the
       connect. It goes over Bluetooth once the printer is on, or through the
       dialog if the connect fails (v1.332.2, RS-389); until then it was
