@@ -171,3 +171,24 @@ test('with FLEET_FORWARD_URL, a manager call and any non-fleet call stay on BACK
     assert.equal(seen[0].headers.get('X-Proxy-Secret'), 'dev-secret');
   }
 });
+
+test('/metrics goes to the backend with the proxy secret and the scraper bearer', async () => {
+  answer = () => new Response('# metrics', { status: 200 });
+  const res = await worker.fetch(new Request('https://erp.example/metrics', {
+    headers: { Authorization: 'Bearer scrape' },
+  }), env({ PROXY_SECRET: 'ps', ASSETS: { fetch: () => assert.fail('served from assets') } }));
+  assert.equal(res.status, 200);
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].url, 'https://backend.example/metrics');
+  assert.equal(seen[0].headers.get('X-Proxy-Secret'), 'ps');
+  assert.equal(seen[0].headers.get('Authorization'), 'Bearer scrape');
+});
+
+test('only the exact /metrics path is forwarded', async () => {
+  let assets = 0;
+  const res = await worker.fetch(new Request('https://erp.example/metrics/backend'),
+    env({ ASSETS: { fetch: async () => { assets += 1; return new Response('x', { status: 200 }); } } }));
+  assert.equal(res.status, 200);
+  assert.equal(assets, 1);
+  assert.equal(seen.length, 0);
+});

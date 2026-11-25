@@ -40,8 +40,7 @@ The release flow itself (`dev` → `main` is a full release) is in the root
   accounts, and wiping their slots costs a Facebook login per worker.  The
   fleet tables, and the slotted pool accounts' sealed columns, cookie
   fields, status and note, go to a `sync_keep` schema before the drop and
-  come back once the redeployed backend has migrated.  So do the approved chat bridge extensions in `fb_chat_devices` (v1.455.0).  So does `perf_rollups`
-  (v1.418.1), so dev's Settings ▸ Performance shows dev's traffic.  A run whose restore
+  come back once the redeployed backend has migrated.  So do the approved chat bridge extensions in `fb_chat_devices` (v1.455.0).  A run whose restore
   did not finish (`fleet NOT restored` in the db-sync log) leaves
   `sync_keep`, and every later run refuses until someone runs
   `restore-fleet.sql` against dev (`psql --single-transaction -f`) or drops
@@ -258,24 +257,51 @@ them and recreate only `rs-coordinator`.
 
 ## Performance evidence
 
-Start optimization work from `perf_rollups`, not from a feeling. Settings ▸
-Performance shows it, and managers can read the same data from
-`/api/perf/routes`, `/loads`, `/versions` and `/compare?from=&to=`.
+Request and page-load timing lives in Prometheus, not in the ERP (v1.482.0).
+The backend serves it at `/metrics` (`apps/backend/src/metrics.ts`), and the
+homelab Prometheus on `10.10.60.5` scrapes it every 30 s through the Worker as
+the `recycle-erp-backend` job. Grafana's `recycle-erp` dashboard draws it.
+
+- **Access.** The Worker forwards the exact path `/metrics` and adds the proxy
+  secret. The backend then wants `Authorization: Bearer $METRICS_TOKEN`, set on
+  the Railway `backend` service of each environment. In production an unset
+  token answers 404; elsewhere it leaves `/metrics` open for local work.
+  Prometheus reads the token from `/srv/homelab_monitoring/secrets/erp_metrics_token`
+  on `10.10.60.5`, outside the rsynced config tree. Rotating it means a new
+  Railway variable, which redeploys, and the same file.
+- **Series.** `http_request_duration_seconds` and `http_requests_total` by method,
+  matched route and status; `web_page_{load,lcp,ttfb}_seconds` by shell and page.
+  Every series carries `release`. Counters restart on each deploy, which `rate()`
+  and `increase()` absorb.
+- **Retention is 15 days.** Older evidence is gone, so compare a release
+  against the one before it soon after it ships.
+
+Start optimization work from these, not from a feeling:
 
 1. Rank by total time. A route called 40,000 times at 80 ms costs more than one
-   called twice at 8 s. Turn the machine-traffic filter off when the question is
-   about the fleet.
-2. Change it, and ship it as its own version where you can: rollups are per
-   release, so a release that bundles several changes can't separate them.
-3. Compare the two versions. Read the request counts first, because each release
-   sees different traffic, and a low-sample row means little.
+   called twice at 8 s:
+   `topk(20, sum by (method, route) (increase(http_request_duration_seconds_sum{job="recycle-erp-backend"}[7d])))`.
+   Traffic no person waits on, which is fleet workers and hosts, memtrade's push,
+   health checks and the scrape itself, can be dropped with
+   `route!~"/api/fleet/worker.*|/api/fleet/hosts/:id/(desired|stopped|tickets|report)|/api/wechat-market/push/.*|/api/health|/metrics"`.
+2. Change it, and ship it as its own version where you can. A release that
+   bundles several changes can't separate them.
+3. Compare the two versions:
+   `histogram_quantile(0.95, sum by (le, release) (increase(http_request_duration_seconds_bucket{route="/api/orders/:id"}[3d])))`.
+   Read `sum by (release) (increase(http_requests_total{…}[3d]))` first. Each
+   release sees different traffic, and a low-sample p95 means little.
+4. For page loads, use
+   `histogram_quantile(0.75, sum by (le, page) (increase(web_page_lcp_seconds_bucket[7d])))`.
 
-Limits: percentiles are bucket estimates, so a small move inside one bucket isn't
-evidence. Request time stops when the handler returns, so it doesn't cover the
-network or the browser. The `client timing` log line still has the fields rollups
-leave out, such as API calls per load and connection speed. Nothing records
-per-query time; `pg_stat_statements` would, but enabling it restarts the prod
-database, so ask the owner first.
+Limits:
+- Percentiles are bucket estimates, so a small move inside one bucket isn't
+  evidence.
+- Request time stops when the handler returns, so it doesn't cover the network
+  or the browser.
+- The `client timing` log line still has the fields the histograms leave out,
+  such as API calls per load and connection speed.
+- Nothing records per-query time. `pg_stat_statements` would, but enabling it
+  restarts the prod database, so ask the owner first.
 
 ## Infrastructure (Terraform)
 

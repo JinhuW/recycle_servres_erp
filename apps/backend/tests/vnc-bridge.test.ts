@@ -5,7 +5,6 @@ import { WebSocket, WebSocketServer } from 'ws';
 import { createAdaptorServer } from '@hono/node-server';
 import app from '../src/index';
 import { attachVncBridge, closeVncBridges, openVncBridges, VNC_SESSION_LAPSED } from '../src/vncBridge';
-import { flushPerf } from '../src/lib/perf';
 import { getTestDb, resetDb } from './helpers/db';
 import { api, testEnv } from './helpers/app';
 import { loginAs, ALEX, MARCUS } from './helpers/auth';
@@ -122,7 +121,6 @@ function connect(path: string, opts: { token?: string; origin?: string; send?: s
 describe('VNC bridge (/api/coordinator/vnc/:workerId/ws)', () => {
   it('leaves a socket out of the request timings, which only see its authorization', async () => {
     const { token } = await loginAs(ALEX);
-    await flushPerf(getTestDb());
     const holdMs = 1000;
     await new Promise<void>((resolve, reject) => {
       const ws = new WebSocket(`ws://127.0.0.1:${erpPort}/api/coordinator/vnc/ne-1/ws`, {
@@ -134,13 +132,15 @@ describe('VNC bridge (/api/coordinator/vnc/:workerId/ws)', () => {
       });
       ws.once('close', () => resolve());
     });
-    await flushPerf(getTestDb());
 
-    const rows = await getTestDb()<{ name: string; max_ms: number }[]>`
-      SELECT name, max_ms FROM perf_rollups WHERE kind = 'http' AND name LIKE '%vnc%'
-    `;
-    expect(rows.length).toBeGreaterThan(0);
-    for (const r of rows) expect(r.max_ms).toBeLessThan(holdMs);
+    // Every vnc observation must sit at or under the 0.5 s bound, which is
+    // half the time the socket was held open.
+    const body = (await api<string>('GET', '/metrics')).body as unknown as string;
+    const series = (suffix: string, extra = '') => body.split('\n')
+      .filter((l) => l.startsWith(`http_request_duration_seconds_${suffix}{`) && l.includes('vnc') && l.includes(extra))
+      .reduce((sum, l) => sum + Number(l.split(' ').pop()), 0);
+    expect(series('count')).toBeGreaterThan(0);
+    expect(series('bucket', 'le="0.5"')).toBe(series('count'));
   });
 
   it('relays bytes both ways with the facade credentials kept server-side', async () => {
