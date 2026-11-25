@@ -11,7 +11,6 @@ import { buildEnv } from './env';
 import { closeSharedDb, getDb } from './db';
 import { startFxRefreshLoop } from './lib/fx';
 import { log } from './lib/log';
-import { flushPerf, startPerfLoop } from './lib/perf';
 import { onShutdown } from './lib/shutdown';
 import { startPackageTrackingLoop } from './shipping/track';
 import { startBankSyncLoop } from './banktx/sync';
@@ -54,7 +53,6 @@ const loops = [
   startFbPoolAliveCheckLoop(getDb(env), env),
   startFleetSchedulerLoop(getDb(env), env),
   startProxyHealthLoop(getDb(env), env),
-  startPerfLoop(getDb(env)),
   // The fleet VNC relay pairs sockets in memory: one instance serves it.
   startFleetRelayLease(getDb(env)),
   startFbChatTelegramLoop(env),
@@ -76,11 +74,7 @@ attachVncBridge(server as Server, app, env);
 const shutdown = onShutdown({
   server: server as Server,
   loops,
-  // After the drain, so the last requests of a release are counted under it.
-  closeDb: async () => {
-    await flushPerf(getDb(env));
-    await closeSharedDb();
-  },
+  closeDb: closeSharedDb,
   graceMs: 20_000,
   hardMs: 25_000,
 });

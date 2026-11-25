@@ -65,7 +65,6 @@ import webSubmissionsRoutes from './routes/webSubmissions';
 import activityRoutes from './routes/activity';
 import clientErrorRoutes from './routes/clientErrors';
 import clientTimingRoutes from './routes/clientTimings';
-import perfRoutes from './routes/perf';
 import wellKnown, { oauth as oauthRoutes, oauthAdmin } from './oauth/server';
 import { handleMcp } from './mcp/server';
 import { bearerGuard } from './oauth/guard';
@@ -428,7 +427,6 @@ app.use('/api/client-errors/*', authMiddleware);
 // to the prefix root, which `/*` alone does not match.
 app.use('/api/client-timings', authMiddleware);
 app.use('/api/client-timings/*', authMiddleware);
-app.use('/api/perf/*', authMiddleware);
 // Bare path matters here too: the packages list lives at the prefix root.
 app.use('/api/packages', authMiddleware);
 app.use('/api/packages/*', authMiddleware);
@@ -466,7 +464,6 @@ app.route('/api/workspace', fxRatesRoutes);
 app.route('/api/activity', activityRoutes);
 app.route('/api/client-errors', clientErrorRoutes);
 app.route('/api/client-timings', clientTimingRoutes);
-app.route('/api/perf', perfRoutes);
 // /api/oauth/clients: cookie-authed, manager-only. The sub-app self-applies
 // authMiddleware + a role check, so we don't add it to the broad /api/* auth
 // list above. csrfGuard still runs from the global stack.

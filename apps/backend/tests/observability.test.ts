@@ -67,10 +67,10 @@ describe('observability counters', () => {
     expect(m.status).toBe(200);
     const text = m.body as unknown as string;
 
-    expect(text).toMatch(/oauth_grants_total\{[^}]*grant_type="client_credentials"[^}]*status="ok"\}\s+\d+/);
-    expect(text).toMatch(/mcp_tool_calls_total\{[^}]*tool="list_market_values"[^}]*status="ok"\}\s+\d+/);
-    expect(text).toMatch(/market_writes_total\{[^}]*outcome="updated"\}\s+\d+/);
-    expect(text).toMatch(/market_writes_total\{[^}]*outcome="notfound"\}\s+\d+/);
+    expect(text).toMatch(/oauth_grants_total\{[^}]*grant_type="client_credentials"[^}]*status="ok"[^}]*\}\s+\d+/);
+    expect(text).toMatch(/mcp_tool_calls_total\{[^}]*tool="list_market_values"[^}]*status="ok"[^}]*\}\s+\d+/);
+    expect(text).toMatch(/market_writes_total\{[^}]*outcome="updated"[^}]*\}\s+\d+/);
+    expect(text).toMatch(/market_writes_total\{[^}]*outcome="notfound"[^}]*\}\s+\d+/);
   });
 
   it('increments oauth_refresh_revocations_total on client revoke + reuse', async () => {
@@ -104,7 +104,7 @@ describe('observability counters', () => {
     const m = await api('GET', '/metrics');
     expect(m.status).toBe(200);
     const text = m.body as unknown as string;
-    expect(text).toMatch(/oauth_refresh_revocations_total\{reason="client_revoked"\}\s+\d+/);
+    expect(text).toMatch(/oauth_refresh_revocations_total\{[^}]*reason="client_revoked"[^}]*\}\s+\d+/);
   });
 
   it('counts one client_revoked revocation per live family, and none without one', async () => {

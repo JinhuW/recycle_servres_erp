@@ -139,6 +139,9 @@ export type Env = {
   // it — so the public Railway origin can't be hit directly, only via the
   // Worker. Unset disables the gate (Docker stack / local dev). See index.ts.
   PROXY_SECRET?: string;
+  // Bearer the Prometheus scraper presents on GET /metrics. Production serves
+  // no metrics without it; elsewhere an unset token leaves /metrics open.
+  METRICS_TOKEN?: string;
   // 'production' locks down dev-only conveniences (e.g. the demo-accounts
   // login picker). Sourced from process.env.NODE_ENV.
   NODE_ENV?: string;

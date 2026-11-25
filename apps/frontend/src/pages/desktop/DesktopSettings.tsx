@@ -18,12 +18,11 @@ const CategoriesPanel = lazy(() => import('./settings/CategoriesPanel').then(m =
 const AiModelsPanel = lazy(() => import('./settings/AiModelsPanel').then(m => ({ default: m.AiModelsPanel })));
 const GeneralPanel = lazy(() => import('./settings/GeneralPanel').then(m => ({ default: m.GeneralPanel })));
 const FxRatesPanel = lazy(() => import('../../components/FxRatesPanel').then(m => ({ default: m.FxRatesPanel })));
-const PerformancePanel = lazy(() => import('./settings/PerformancePanel').then(m => ({ default: m.PerformancePanel })));
 const EbayPanel = lazy(() => import('./settings/EbayPanel').then(m => ({ default: m.EbayPanel })));
 const DesktopSettingsConnectors = lazy(() => import('./DesktopSettingsConnectors').then(m => ({ default: m.DesktopSettingsConnectors })));
 
 // ─── Shell ────────────────────────────────────────────────────────────────────
-type SectionId = 'account' | 'members' | 'warehouses' | 'customers' | 'categories' | 'general' | 'ai' | 'fx' | 'performance' | 'ebay' | 'connectors';
+type SectionId = 'account' | 'members' | 'warehouses' | 'customers' | 'categories' | 'general' | 'ai' | 'fx' | 'ebay' | 'connectors';
 
 // Section labels are looked up via t() at render time — id ↔ tKey is the
 // only declarative mapping we need; pluralization / casing belongs to the
@@ -41,7 +40,6 @@ const SECTIONS: { id: SectionId; labelKey: string; subKey: string; icon: IconNam
   { id: 'general',    labelKey: 'settingsNavGeneral',    subKey: 'settingsNavGeneralSub',    icon: 'settings', managerOnly: true },
   { id: 'ai',         labelKey: 'settingsNavAi',         subKey: 'settingsNavAiSub',         icon: 'chip', managerOnly: true },
   { id: 'fx',         labelKey: 'settingsNavFx',         subKey: 'settingsNavFxSub',         icon: 'refresh', managerOnly: true },
-  { id: 'performance', labelKey: 'settingsNavPerformance', subKey: 'settingsNavPerformanceSub', icon: 'analytics', managerOnly: true },
   { id: 'ebay',       labelKey: 'settingsNavEbay',       subKey: 'settingsNavEbaySub',       icon: 'tag', managerOnly: true },
   { id: 'connectors', labelKey: 'connectorsTab',         subKey: 'settingsNavConnectorsSub', icon: 'chip' },
 ];
@@ -102,7 +100,6 @@ export function DesktopSettings({ showToast }: { showToast?: (msg: string, kind?
             {section === 'general'    && <GeneralPanel />}
             {section === 'ai'         && <AiModelsPanel />}
             {section === 'fx'         && <FxRatesPanel />}
-            {section === 'performance' && <PerformancePanel />}
             {section === 'ebay'       && <EbayPanel showToast={showToast} />}
             {section === 'connectors' && <DesktopSettingsConnectors />}
           </Suspense>

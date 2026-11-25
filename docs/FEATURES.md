@@ -5124,23 +5124,21 @@ removed in v1.191.0.
   navigation timing, LCP, and the request/refresh counts for the page load, one
   report per load. Numbers only, no paths — it is the answer to "the page feels
   slow", which until then had no evidence behind it either way.
-- **Performance is kept per route and release** (v1.418.0). Settings ▸
-  Performance, managers only, on desktop, shows the last 24 hours, 7 days or 30
-  days:
-  - **Slowest routes**, ranked by total time spent, with request count, p50, p95,
-    p99, max and 5xx rate. Traffic no person waits on (fleet workers and hosts,
-    memtrade's push and poll, health checks, metrics) is hidden by default; the
-    manager's own Hosts tab stays listed (v1.418.1).
-  - **Page loads** by page and shell: LCP, load and TTFB percentiles. Only full
-    loads count; moving between pages inside the app does not. A page hidden
-    before it finished loading adds no load time, and a path no page claims
-    counts as `other`, not Home (v1.418.1).
-  - **Compare releases**: p50 and p95 for each route between any two versions.
-    A route with under 30 requests on either side is marked and ranked last.
+- **Performance is exposed as Prometheus metrics** (v1.482.0). It replaced
+  Settings ▸ Performance and its `perf_rollups` table (v1.418.0). `GET /metrics`
+  is reachable through the Worker with the `METRICS_TOKEN` bearer, and the
+  homelab Prometheus scrapes it into the `recycle-erp` Grafana dashboard. It
+  serves:
+  - `http_request_duration_seconds` and `http_requests_total` by method,
+    matched route pattern and status.
+  - `web_page_load_seconds`, `web_page_lcp_seconds` and `web_page_ttfb_seconds`
+    by shell and page, from the browser's load reports. Only full loads count,
+    and a path no page claims is `other`.
+  - Node process metrics and the OCR, OAuth, MCP and market-write counters.
 
-  Percentiles are estimates from histogram buckets. Rows are hourly and kept for
-  400 days, and hold no user identity, ids or raw paths. New data lands within
-  about a minute. Per-query SQL timing is not recorded.
+  Every series carries a `release` label, so two versions compare in PromQL.
+  Labels hold no user identity, ids or raw paths. History is the homelab
+  Prometheus's retention, 15 days.
 - `/api/health` reports version, build date, commit and provider modes.
 - **Ops alerts reach one Telegram group** (v1.322.0, v1.325.0). Everything
   goes to the "Homelab Alerts" group, each source in its own topic:

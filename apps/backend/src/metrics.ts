@@ -1,23 +1,32 @@
-// Prometheus metrics for the Hono backend.
+// Prometheus metrics for the Hono backend, scraped by the homelab Prometheus.
 //
 // One process-wide Registry. Default Node.js metrics (heap, GC, eventloop
-// lag) plus an HTTP-duration histogram and an OCR counter. Route labels
+// lag) plus HTTP and page-load histograms and a few counters. Route labels
 // come from Hono's matched-pattern (`c.req.routePath`), NOT the raw URL —
 // otherwise every order ID would mint a fresh series and blow up
 // cardinality on the remote Prometheus.
+//
+// This is the only performance record the ERP keeps. Counters restart with
+// each deploy, which rate() absorbs; the `release` label on every series is
+// what lets two releases be compared.
 
 import type { Context, Next } from 'hono';
 import { Registry, collectDefaultMetrics, Counter, Histogram } from 'prom-client';
-import { PERF_BUCKETS_MS, recordPerf } from './lib/perf';
+import { releaseVersion } from './lib/log';
+import { secretMatches } from './lib/secret';
+import type { Env } from './types';
 
 const registry = new Registry();
+registry.setDefaultLabels({ release: releaseVersion() });
 collectDefaultMetrics({ register: registry });
+
+const BUCKETS_SECONDS = [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30];
 
 const httpRequestDuration = new Histogram({
   name: 'http_request_duration_seconds',
   help: 'HTTP request duration in seconds, labeled by Hono matched route.',
   labelNames: ['method', 'route', 'status'] as const,
-  buckets: PERF_BUCKETS_MS.map((ms) => ms / 1000),
+  buckets: BUCKETS_SECONDS,
   registers: [registry],
 });
 
@@ -27,6 +36,33 @@ const httpRequestsTotal = new Counter({
   labelNames: ['method', 'route', 'status'] as const,
   registers: [registry],
 });
+
+// What the browser waited for, one observation per real page load. shell and
+// page are closed sets (routes/clientTimings.ts), so a URL can't become a label.
+const pageLoadLabels = ['shell', 'page'] as const;
+const pageLoadSeconds = {
+  load: new Histogram({
+    name: 'web_page_load_seconds',
+    help: 'Browser load event time per full page load.',
+    labelNames: pageLoadLabels, buckets: BUCKETS_SECONDS, registers: [registry],
+  }),
+  lcp: new Histogram({
+    name: 'web_page_lcp_seconds',
+    help: 'Largest Contentful Paint per full page load.',
+    labelNames: pageLoadLabels, buckets: BUCKETS_SECONDS, registers: [registry],
+  }),
+  ttfb: new Histogram({
+    name: 'web_page_ttfb_seconds',
+    help: 'Time to first byte of the document per full page load.',
+    labelNames: pageLoadLabels, buckets: BUCKETS_SECONDS, registers: [registry],
+  }),
+};
+
+export function observePageLoad(
+  metric: keyof typeof pageLoadSeconds, shell: string, page: string, ms: number,
+): void {
+  pageLoadSeconds[metric].observe({ shell, page }, ms / 1000);
+}
 
 export const ocrCallsTotal = new Counter({
   name: 'ocr_calls_total',
@@ -82,12 +118,24 @@ export async function metricsMiddleware(c: Context, next: Next): Promise<void> {
     const labels = { method: c.req.method, route, status };
     httpRequestDuration.observe(labels, seconds);
     httpRequestsTotal.inc(labels);
-    recordPerf('http', `${c.req.method} ${route}`, seconds * 1000, { error: c.res.status >= 500 });
   }
 }
 
 // /metrics handler: serializes the registry in Prometheus exposition format.
+// The Worker forwards /metrics, so in production it is reachable from the
+// internet and the bearer is the only thing between it and anyone. Route
+// names and traffic are not for strangers, so production without a token
+// serves nothing rather than everything.
 export async function metricsHandler(c: Context): Promise<Response> {
+  const env = c.env as Env;
+  if (env.METRICS_TOKEN) {
+    const bearer = c.req.header('Authorization')?.match(/^Bearer\s+(.+)$/i)?.[1];
+    if (!secretMatches(bearer, env.METRICS_TOKEN)) {
+      return c.json({ error: 'unauthorized' }, 401, { 'WWW-Authenticate': 'Bearer' });
+    }
+  } else if (env.NODE_ENV === 'production') {
+    return c.json({ error: 'not found' }, 404);
+  }
   const body = await registry.metrics();
   return new Response(body, {
     status: 200,

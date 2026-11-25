@@ -5,6 +5,9 @@
 import { isShellPath } from '../../apps/frontend/src/lib/shellPaths';
 
 const API_PREFIXES = ['/api', '/oauth', '/.well-known'];
+// The backend's Prometheus endpoint, for the homelab scraper. The backend
+// demands its own bearer here, so the proxy secret alone opens nothing.
+const BACKEND_PATHS = ['/metrics'];
 // Static build output, cached by public/_headers (`immutable` for a year under
 // /assets/ and /fonts/, a day under /icons/). A miss under these is never a
 // page the user typed — it is a file from another build — so it must 404
@@ -23,7 +26,7 @@ export default {
       url.protocol = 'https:';
       return Response.redirect(url.toString(), 308);
     }
-    const isApi = API_PREFIXES.some(
+    const isApi = BACKEND_PATHS.includes(url.pathname) || API_PREFIXES.some(
       (p) => url.pathname === p || url.pathname.startsWith(p + '/'),
     );
     if (!isApi) {

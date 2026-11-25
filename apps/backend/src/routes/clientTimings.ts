@@ -1,8 +1,8 @@
 import { Hono } from 'hono';
 import { PERF_PAGES } from '@recycle-erp/shared';
 import { log } from '../lib/log';
-import { recordPerf } from '../lib/perf';
 import { createRateLimiter } from '../lib/rate-limit';
+import { observePageLoad } from '../metrics';
 import type { Env, User } from '../types';
 
 // Where the browser says how long the load actually took.
@@ -40,7 +40,7 @@ const NAV_TYPES = ['navigate', 'reload', 'back_forward', 'prerender'] as const;
 const navType = (v: unknown): string | undefined =>
   typeof v === 'string' && (NAV_TYPES as readonly string[]).includes(v) ? v : undefined;
 
-// Closed sets, so neither can carry a URL into the log or a rollup's name.
+// Closed sets, so neither can carry a URL into the log or a metric label.
 const shellOf = (v: unknown): string => (v === 'desktop' || v === 'mobile' ? v : 'unknown');
 const pageOf = (v: unknown): string =>
   typeof v === 'string' && (PERF_PAGES as readonly string[]).includes(v) ? v : 'other';
@@ -79,9 +79,9 @@ clientTimings.post('/', async (c) => {
   if (nav === 'navigate' || nav === 'reload') {
     // A page hidden before its load event reports 0: not an instant load but an
     // unfinished one, usually a slow one the user gave up watching.
-    if (loadEvent > 0) recordPerf('client', `load|${shell}|${page}`, loadEvent);
-    if (ttfb !== undefined) recordPerf('client', `ttfb|${shell}|${page}`, ttfb);
-    if (lcp !== undefined) recordPerf('client', `lcp|${shell}|${page}`, lcp);
+    if (loadEvent > 0) observePageLoad('load', shell, page, loadEvent);
+    if (ttfb !== undefined) observePageLoad('ttfb', shell, page, ttfb);
+    if (lcp !== undefined) observePageLoad('lcp', shell, page, lcp);
   }
 
   // log.info, not warn: this is the healthy path. It rides the same ambient
