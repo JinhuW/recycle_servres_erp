@@ -222,6 +222,23 @@ export function unlinkedFrag(sql: SqlClient | TransactionSql, legAlias: string) 
   return sql`${a}.order_id IS NULL AND ${a}.sell_order_id IS NULL`;
 }
 
+// A row a taught counterparty (bank_transfer_counterparties) may turn into a
+// transfer. One fragment for the sync and for mark-transfer's backfill, so the
+// two cannot classify different rows.
+export function counterpartyRuleTargetFrag(sql: SqlClient | TransactionSql, legAlias: string) {
+  const a = sql(legAlias);
+  return sql`${a}.category = 'external' AND NOT ${a}.category_manual AND ${unlinkedFrag(sql, legAlias)}
+    -- Money that never moved is not a transfer; reclassifying it would put
+    -- it back into a tile it is deliberately kept out of.
+    AND ${a}.settle_status = 'settled'
+    -- Paired means its sibling is already known. A payment pair half-turned
+    -- into a transfer is refused by /link, and nothing ever revisits it.
+    AND ${a}.pair_id IS NULL
+    -- Mercury names every "PAYPAL *name" card charge's counterparty PayPal,
+    -- the same as a move to our own PayPal balance. The charge paid a vendor.
+    AND NOT (${a}.source = 'mercury' AND COALESCE(${a}.description, '') LIKE 'PAYPAL *%')`;
+}
+
 export function isLinked(leg: { order_id: string | null; sell_order_id: string | null }): boolean {
   return leg.order_id !== null || leg.sell_order_id !== null;
 }
