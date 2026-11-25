@@ -7,7 +7,7 @@ priority: P1
 created: 2026-11-25
 reporter: jinhu
 branch: fix/paired-payment-not-transfer
-pr:
+pr: 1263
 version: 1.482.1
 related: []
 ---
