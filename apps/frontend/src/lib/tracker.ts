@@ -47,6 +47,7 @@ export type TrackerSubreddit = {
 // before a round-trip.
 const SUBREDDIT_NAME_RE = /^[A-Za-z0-9_]{2,30}$/;
 export const MIN_POLL_INTERVAL_S = 30;
+export const MAX_STALL_ALERT_MIN = 1440;
 
 /** Trims, strips a leading r/ or /r/, lowercases; null when invalid. */
 export function normalizeSubredditName(input: string): string | null {
@@ -383,10 +384,17 @@ export const trackerApi = {
     api.post<{ evalPrompt: string; llmModel: string; disabledRules: number[]; promptVersionId: number | null }>(
       '/api/tracker/prompt-candidate/promote', {},
     ),
-  // The one tracker setting the proxy opens; the rest stay behind it.
+  // The tracker settings the proxy opens (this and the stall alert); the
+  // rest stay behind it.
   llmKeys: () => api.get<unknown>('/api/tracker/llm-keys').then(parseTrackerKeys),
   setModel: (model: string) =>
     api.put<{ key: string; value: string }>('/api/tracker/settings/llm_model', { value: model }).then(r => r.value),
+  // Minutes without a judged post before ops are paged; 0 is off.
+  stallAlertMinutes: () =>
+    api.get<{ key: string; value: number }>('/api/tracker/settings/eval_stall_alert_min').then(r => r.value),
+  setStallAlertMinutes: (minutes: number) =>
+    api.put<{ key: string; value: number }>('/api/tracker/settings/eval_stall_alert_min', { value: minutes })
+      .then(r => r.value),
 
   listSubreddits: () =>
     api.get<{ subreddits: TrackerSubreddit[] }>('/api/tracker/subreddits').then(r => r.subreddits),

@@ -8,7 +8,7 @@ writes each column. Self-explanatory columns (ids, timestamps) are left blank
 on purpose. Any other blank meaning is one that neither the SQL nor the code
 made clear enough to state.
 
-**As of 2026-11-23:** ERP migration `0255`, Reddit tracker migration `0011`,
+**As of 2026-11-24:** ERP migration `0255`, Reddit tracker migration `0012`,
 Facebook tracker `0.13.18`. *Keeping this file current* at the end says how to
 refresh a section.
 
@@ -3386,7 +3386,7 @@ Runtime business config as key → JSON value, one row per key, seeded by migrat
 
 | Column | Type | Not null | Default | Meaning |
 | --- | --- | :-: | --- | --- |
-| `key` | `text` | ✓ |  | eval_prompt (live system prompt), llm_model (model ref: a bare OpenRouter id, `anthropic:<id>` or `openai:<id>`), telegram_chat_ids (buyer chats), max_post_age_hours (older posts are rejected unjudged; 1–720), telegram_dev_chat_ids (review chats), candidate_eval_prompt ('' = no trial), candidate_llm_model ('' = use llm_model), poll_source (`reddit` = workers poll Reddit, `webhook` = the poll loop idles and posts arrive from the redditapis.com monitor; migration 0009). |
+| `key` | `text` | ✓ |  | eval_prompt (live system prompt), llm_model (model ref: a bare OpenRouter id, `anthropic:<id>` or `openai:<id>`), telegram_chat_ids (buyer chats), max_post_age_hours (older posts are rejected unjudged; 1–720), telegram_dev_chat_ids (review chats), candidate_eval_prompt ('' = no trial), candidate_llm_model ('' = use llm_model), poll_source (`reddit` = workers poll Reddit, `webhook` = the poll loop idles and posts arrive from the redditapis.com monitor; migration 0009), eval_stall_alert_min (minutes a post may wait unjudged behind the newest judged one before the watch pages; 0 = off, 0–1440, seeded 60; migration 0012). |
 | `value` | `jsonb` | ✓ |  | JSON string, number or array of chat ids, depending on the key. |
 | `updated_at` | `timestamptz` | ✓ | `now()` |  |
 
@@ -3825,7 +3825,7 @@ Alerts the watch has raised and not yet resolved, so a restarted api neither pag
 
 | Column | Type | Not null | Default | Meaning |
 | --- | --- | :-: | --- | --- |
-| `key` | `text` | ✓ |  | `down:<worker_id>`, `failing:<worker_id>:<loop>`, or `webhook:quiet` (worker_id `fleet`) when `poll_source` is `webhook` and no delivery has arrived for 90 minutes. |
+| `key` | `text` | ✓ |  | `down:<worker_id>`, `failing:<worker_id>:<loop>`, `webhook:quiet` (worker_id `fleet`) when `poll_source` is `webhook` and no delivery has arrived for 90 minutes, or `eval:stalled` (worker_id `fleet`) when posts have waited unjudged past `eval_stall_alert_min`. |
 | `worker_id` | `text` | ✓ |  | The worker it is about. |
 | `raised_at` | `timestamptz` | ✓ | `now()` |  |
 

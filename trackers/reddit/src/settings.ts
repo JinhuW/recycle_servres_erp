@@ -47,6 +47,7 @@ export const SETTING_KEYS = [
   'candidate_eval_prompt',
   'candidate_llm_model',
   'poll_source',
+  'eval_stall_alert_min',
 ] as const;
 
 export type SettingKey = (typeof SETTING_KEYS)[number];
@@ -120,6 +121,19 @@ export class SettingsStore {
  */
 export function parsePollSource(value: unknown): PollSource {
   return value === 'webhook' ? 'webhook' : 'reddit';
+}
+
+/** Default and ceiling of eval_stall_alert_min; 0 is off. */
+export const EVAL_STALL_DEFAULT_MIN = 60;
+export const EVAL_STALL_MAX_MIN = 1440;
+
+/** A missing or mangled row keeps the alert on at its default rather than off. */
+export function parseEvalStallMin(value: unknown): number {
+  return isEvalStallMin(value) ? value : EVAL_STALL_DEFAULT_MIN;
+}
+
+export function isEvalStallMin(value: unknown): value is number {
+  return Number.isInteger(value) && (value as number) >= 0 && (value as number) <= EVAL_STALL_MAX_MIN;
 }
 
 function asString(value: unknown): string | null {

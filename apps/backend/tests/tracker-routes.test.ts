@@ -294,6 +294,34 @@ describe('Tracker proxy routes (/api/tracker)', () => {
     expect(JSON.parse(calls[0]![2]!)).toEqual({ value: 'anthropic/claude-haiku-5.5' });
   });
 
+  it('reads and writes the stall-alert threshold by key, to managers only', async () => {
+    const { token } = await loginAs(ALEX);
+    const calls: Array<[string, string | undefined, string | undefined]> = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
+      calls.push([url, init.method, init.body as string | undefined]);
+      return new Response(JSON.stringify({ key: 'eval_stall_alert_min', value: 30 }), { status: 200 });
+    }));
+
+    const read = await api('GET', '/api/tracker/settings/eval_stall_alert_min', { token, env: TRACKER_ENV });
+    const write = await api('PUT', '/api/tracker/settings/eval_stall_alert_min', {
+      token, env: TRACKER_ENV, body: { value: 30 },
+    });
+
+    expect(read.status).toBe(200);
+    expect(write.body).toEqual({ key: 'eval_stall_alert_min', value: 30 });
+    expect(calls.map(c => [c[0], c[1]])).toEqual([
+      ['http://tracker.internal:8080/api/settings/eval_stall_alert_min', 'GET'],
+      ['http://tracker.internal:8080/api/settings/eval_stall_alert_min', 'PUT'],
+    ]);
+    expect(JSON.parse(calls[1]![2]!)).toEqual({ value: 30 });
+
+    const { token: pur } = await loginAs(MARCUS);
+    expect((await api('PUT', '/api/tracker/settings/eval_stall_alert_min', {
+      token: pur, env: TRACKER_ENV, body: { value: 0 },
+    })).status).toBe(403);
+    expect(calls).toHaveLength(2);
+  });
+
   it('keeps the live model setting manager-only', async () => {
     const { token } = await loginAs(MARCUS);
     const spy = stubTracker(200, {});
