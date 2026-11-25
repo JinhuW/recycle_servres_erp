@@ -15,6 +15,7 @@ import {
   EVALUATOR_MODEL,
   evaluatorModelProblem,
   funnelCounts,
+  MAX_STALL_ALERT_MIN,
   MIN_POLL_INTERVAL_S,
   normalizeSubredditName,
   trackerApi,
@@ -81,6 +82,9 @@ export function DesktopTracker({ showToast }: Props) {
   const [live, setLive] = useState<ConfiguredPrompt | null>(null);
 
   const [modelDialog, setModelDialog] = useState(false);
+  // Null until read, and while a tracker too old to know the setting answers 400.
+  const [stallMin, setStallMin] = useState<number | null>(null);
+  const [stallDialog, setStallDialog] = useState(false);
   const [deletingSub, setDeletingSub] = useState<TrackerSubreddit | null>(null);
 
   const fail = useCallback((err: unknown) => {
@@ -102,6 +106,7 @@ export function DesktopTracker({ showToast }: Props) {
     trackerApi.listRules().then(r => { if (alive) setRules(r); }).catch(err => { if (alive) fail(err); });
     trackerApi.listSubreddits().then(s => { if (alive) setSubs(s); }).catch(err => { if (alive) fail(err); });
     loadLivePrompt().catch(err => { if (alive) fail(err); });
+    trackerApi.stallAlertMinutes().then(m => { if (alive) setStallMin(m); }).catch(() => {});
     return () => { alive = false; };
   }, [fail, loadLivePrompt]);
 
@@ -191,6 +196,7 @@ export function DesktopTracker({ showToast }: Props) {
           <FlowCard stats={stats} subs={subs} rules={rules} live={live} locale={locale}
             onSubsChanged={setSubs} onDeleteSub={setDeletingSub}
             onEditModel={() => setModelDialog(true)}
+            stallMin={stallMin} onEditStall={() => setStallDialog(true)}
             onError={fail} showToast={showToast} />
         ) : <>
           <WorkerLegend counts={counts} filter={filter} onFilter={setFilter} />
@@ -212,6 +218,19 @@ export function DesktopTracker({ showToast }: Props) {
             setLive(l => l && { ...l, model: saved });
             setModelDialog(false);
             showToast?.(t('trkModelSaved'));
+          }}
+          onError={fail}
+        />
+      )}
+
+      {stallDialog && stallMin !== null && (
+        <StallAlertModal
+          minutes={stallMin}
+          onClose={() => setStallDialog(false)}
+          onSaved={saved => {
+            setStallMin(saved);
+            setStallDialog(false);
+            showToast?.(t('trkStallSaved'));
           }}
           onError={fail}
         />
@@ -568,7 +587,7 @@ function MatchesAside({ matches, locale }: { matches: TrackerMatch[] | Unavailab
 
 type Setting = { label: string; value: string; fixed?: boolean; onEdit?: () => void; editLabel?: string };
 
-function FlowCard({ stats, subs, rules, live, locale, onSubsChanged, onDeleteSub, onEditModel, onError, showToast }: {
+function FlowCard({ stats, subs, rules, live, locale, onSubsChanged, onDeleteSub, onEditModel, stallMin, onEditStall, onError, showToast }: {
   stats: TrackerStats | Unavailable | null;
   subs: TrackerSubreddit[] | null;
   rules: TrackerRule[] | null;
@@ -577,6 +596,8 @@ function FlowCard({ stats, subs, rules, live, locale, onSubsChanged, onDeleteSub
   onSubsChanged: (update: (prev: TrackerSubreddit[] | null) => TrackerSubreddit[] | null) => void;
   onDeleteSub: (sub: TrackerSubreddit) => void;
   onEditModel: () => void;
+  stallMin: number | null;
+  onEditStall: () => void;
   onError: (err: unknown) => void;
   showToast?: (msg: string, kind?: 'success' | 'error') => void;
 }) {
@@ -605,6 +626,9 @@ function FlowCard({ stats, subs, rules, live, locale, onSubsChanged, onDeleteSub
         return [
           { label: t('trkSetModel'), value: live?.model ?? '—',
             onEdit: live === null ? undefined : onEditModel, editLabel: t('trkEditModel') },
+          { label: t('trkSetStall'),
+            value: stallMin === null ? '—' : stallMin === 0 ? t('trkStallOff') : t('trkStallValue', { n: stallMin }),
+            onEdit: stallMin === null ? undefined : onEditStall, editLabel: t('trkEditStall') },
           { label: t('trkSetRules'), value: rules ? `${rules.filter(r => r.enabled).length} / ${rules.length}` : '—' },
           { label: t('trkSetPending'), value: v(n('new')) },
           { label: t('trkSetRejected'), value: v(n('rejected')) },
@@ -915,6 +939,51 @@ function ModelModal({ model, onClose, onSaved, onError }: {
             invalid={hint !== null} unavailableText={t('trkModelsUnavailable')} />
           <span className={`help${hint !== null ? ' rt-help-invalid' : ''}`}>
             {hint ?? t('trkModelHelp')}
+          </span>
+        </div>
+      </div>
+      <div className="modal-foot">
+        <button className="btn" onClick={onClose}>{t('cancel')}</button>
+        <button className="btn primary" disabled={!canSave || saving} onClick={save}>
+          {t('save')}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function StallAlertModal({ minutes, onClose, onSaved, onError }: {
+  minutes: number;
+  onClose: () => void;
+  onSaved: (minutes: number) => void;
+  onError: (err: unknown) => void;
+}) {
+  const { t } = useT();
+  const [value, setValue] = useState(String(minutes));
+  const [saving, setSaving] = useState(false);
+  const next = /^\d+$/.test(value.trim()) ? Number(value.trim()) : null;
+  const invalid = next === null || next > MAX_STALL_ALERT_MIN;
+  const canSave = !invalid && next !== minutes;
+
+  function save() {
+    if (!canSave || saving || next === null) return;
+    setSaving(true);
+    trackerApi.setStallAlertMinutes(next).then(onSaved).catch(onError).finally(() => setSaving(false));
+  }
+
+  return (
+    <Modal onClose={onClose} ariaLabel={t('trkEditStall')} shellStyle={{ width: 480 }}>
+      <div className="modal-head">
+        <div className="modal-title">{t('trkEditStall')}</div>
+      </div>
+      <div className="modal-body">
+        <div className="field">
+          <label className="label" htmlFor="trk-stall">{t('trkStallLabel')}</label>
+          <input id="trk-stall" className="input" type="number" min={0} max={MAX_STALL_ALERT_MIN} step={1}
+            value={value} onChange={e => setValue(e.target.value)} aria-invalid={invalid || undefined}
+            onKeyDown={e => { if (e.key === 'Enter') save(); }} autoFocus />
+          <span className={`help${invalid ? ' rt-help-invalid' : ''}`}>
+            {invalid ? t('trkStallInvalid') : t('trkStallHelp')}
           </span>
         </div>
       </div>

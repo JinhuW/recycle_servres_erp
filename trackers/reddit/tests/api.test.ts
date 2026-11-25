@@ -408,9 +408,24 @@ describe('settings', () => {
     };
 
     expect(Object.keys(body.settings).sort()).toEqual([
-      'candidate_eval_prompt', 'candidate_llm_model', 'eval_prompt', 'llm_model',
-      'max_post_age_hours', 'poll_source', 'telegram_chat_ids', 'telegram_dev_chat_ids',
+      'candidate_eval_prompt', 'candidate_llm_model', 'eval_prompt', 'eval_stall_alert_min',
+      'llm_model', 'max_post_age_hours', 'poll_source', 'telegram_chat_ids', 'telegram_dev_chat_ids',
     ]);
+  });
+
+  it('takes a whole number of stall-alert minutes from 0 to 1440, and reads it back alone', async () => {
+    const put = (value: unknown) => request('/api/settings/eval_stall_alert_min', {
+      method: 'PUT',
+      body: JSON.stringify({value}),
+    });
+    const statuses = [];
+    for (const value of [0, 1440, 1441, -1, 30.5, '30', 90]) statuses.push((await put(value)).status);
+    expect(statuses).toEqual([200, 200, 400, 400, 400, 400, 200]);
+
+    const res = await request('/api/settings/eval_stall_alert_min');
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({key: 'eval_stall_alert_min', value: 90});
+    expect((await request('/api/settings/nonsense')).status).toBe(400);
   });
 });
 

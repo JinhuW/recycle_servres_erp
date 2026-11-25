@@ -10,9 +10,9 @@ import type { Env, User } from '../types';
 // token never reaches the browser. Explicit allowlist rather than a catch-all:
 // the tracker also exposes generic settings and requeue endpoints this UI has
 // no business calling. Prompt trials get their own narrow routes
-// (/prompt-candidate) for exactly that reason, and the one setting the
-// Evaluate stage edits, the live model, is opened by key rather than through
-// a `:key` param. Its LLM keys are only read here (`GET /llm-keys`).
+// (/prompt-candidate) for exactly that reason, and the two settings the
+// Evaluate stage edits, the live model and the stall-alert threshold, are
+// opened by key rather than through a `:key` param. Its LLM keys are only read here (`GET /llm-keys`).
 // Self-applies authMiddleware (oauthAdmin pattern), so index.ts mounts it
 // with a single app.route().
 
@@ -108,6 +108,10 @@ tracker.delete('/prompt-candidate', (c) => forward(c, 'DELETE', '/api/prompt-can
 tracker.post('/prompt-candidate/promote', (c) =>
   forward(c, 'POST', '/api/prompt-candidate/promote', false));
 tracker.put('/settings/llm_model', (c) => forward(c, 'PUT', '/api/settings/llm_model', true));
+tracker.get('/settings/eval_stall_alert_min', (c) =>
+  forward(c, 'GET', '/api/settings/eval_stall_alert_min', false));
+tracker.put('/settings/eval_stall_alert_min', (c) =>
+  forward(c, 'PUT', '/api/settings/eval_stall_alert_min', true));
 // Read-only: which providers the tracker itself holds a key for, so its model
 // pickers offer only those. Keys are written server-side (ai/keys.ts), never
 // through this proxy.

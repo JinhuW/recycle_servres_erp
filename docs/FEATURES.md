@@ -3397,7 +3397,9 @@ Per-role. Purchasers see projected profit from their own Done POs (v0.1.10).
   card with its stage counts, subreddit editor and model picker. Since
   v1.386.0 (RS-464), Evaluate shows the live prompt read-only (base prompt
   plus enabled rules) where the rule editor was; prompts change through a
-  trial on Prompts.
+  trial on Prompts. Since v1.481.0 (RS-614), Evaluate also has an editable
+  **Stall alert**: the minutes posts may wait unjudged before ops are paged
+  (default 60, 0 is off).
   Fleet shows the worker legend, workers table and recent matches.
   The workers toolbar matches
   the Facebook one. A search box on the left finds a worker by id or role,
@@ -5147,7 +5149,9 @@ removed in v1.191.0.
   - the ERP uptime probe;
   - the reddit fleet: a worker down, a loop failing three times in a row,
     and every warn/error line as a minute digest. The watch's own failures
-    to reach the relay stay out of that digest (v1.332.2);
+    to reach the relay stay out of that digest (v1.332.2). Since v1.481.0,
+    also "evaluation stalled" when no post has been judged for the
+    threshold set on the Reddit page;
   - homelab Prometheus (Alertmanager);
   - the Facebook fleet's ops alerts (worker down, session expiring,
     challenge) and deploy notices (facebook-tracker 0.13.15). The buyers'

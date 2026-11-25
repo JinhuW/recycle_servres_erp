@@ -20,7 +20,8 @@ has the repo map and workflow.
   `GET /api/matches`, `GET /api/stats`, `GET /api/prompt-stats`, `GET /api/analytics`,
   `GET /api/seen`,
   `PUT|DELETE /api/prompt-candidate`, `POST /api/prompt-candidate/promote`,
-  `PUT /api/settings/llm_model` and no other settings key)
+  `PUT /api/settings/llm_model`, `GET|PUT /api/settings/eval_stall_alert_min`
+  and no other settings key)
   for the ERP's Monitors ▸ Reddit page. Changing one of those response shapes,
   or adding a route the page needs, is a change to both sides; see the root AGENTS.md
   under *Contracts*. Keep the tracker backward-compatible until the ERP release

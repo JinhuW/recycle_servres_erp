@@ -22,6 +22,8 @@ beforeEach(async () => {
   await db.sql`DELETE FROM worker_errors`;
   await db.sql`DELETE FROM watch_alerts`;
   await db.sql`DELETE FROM webhook_deliveries`;
+  await db.sql`DELETE FROM posts`;
+  await db.sql`UPDATE settings SET value = to_jsonb(60) WHERE key = 'eval_stall_alert_min'`;
   await db.sql`UPDATE settings SET value = to_jsonb('reddit'::text) WHERE key = 'poll_source'`;
   posted = [];
   relayStatus = 204;
@@ -290,5 +292,73 @@ describe('webhook quiet', () => {
       ['firing', 'Reddit webhook quiet'],
       ['resolved', 'Reddit webhook back'],
     ]);
+  });
+});
+
+describe('evaluation stalled', () => {
+  async function addPost(id: string, status: string, ageMin: number) {
+    await db.sql`
+      INSERT INTO posts (reddit_id, subreddit, title, url, posted_at, discovered_at, status)
+      VALUES (${id}, 'homelab', ${id}, ${'https://reddit.com/' + id},
+              NOW() - make_interval(mins => ${ageMin}), NOW() - make_interval(mins => ${ageMin}), ${status})`;
+  }
+  const stallAlerts = () => posted.filter((a) => a.title.startsWith('Reddit evaluation'));
+
+  it('raises when posts behind the newest judged one wait past the threshold, then resolves', async () => {
+    await addPost('t3_ok', 'rejected', 200);
+    await addPost('t3_a', 'failed', 90);
+    await addPost('t3_b', 'new', 30);
+    await worker('w-1', {failures: failing(0, 'evaluation failed: OpenRouter HTTP 401: User not found.')});
+
+    await watch();
+    await watch();
+
+    expect(stallAlerts()).toEqual([{
+      topic: 'reddit_workers',
+      status: 'firing',
+      title: 'Reddit evaluation stalled',
+      lines: [
+        'No post has been judged for 90 min; 2 waiting or failed since.',
+        'Last evaluate error: evaluation failed: OpenRouter HTTP 401: User not found.',
+        'The usual cause is a provider key that is refused or out of credit: check ERP Settings ▸ AI models.',
+        "Threshold 60 min, set on the ERP's Reddit page (Workflow ▸ Evaluate).",
+      ],
+    }]);
+
+    await addPost('t3_c', 'rejected', 1);
+    await watch();
+
+    expect(stallAlerts()[1]).toMatchObject({status: 'resolved', title: 'Reddit evaluation resumed'});
+    expect(await db.sql`SELECT 1 FROM watch_alerts`).toHaveLength(0);
+  });
+
+  it('stays quiet within the threshold, and when one old post is outrun by a judged one', async () => {
+    await addPost('t3_stuck', 'failed', 300);
+    await addPost('t3_ok', 'rejected', 120);
+    await addPost('t3_fresh', 'new', 20);
+
+    await watch();
+
+    expect(stallAlerts()).toEqual([]);
+  });
+
+  it('raises on a fresh database with nothing judged yet', async () => {
+    await addPost('t3_a', 'new', 61);
+
+    await watch();
+
+    expect(stallAlerts()[0]).toMatchObject({status: 'firing', title: 'Reddit evaluation stalled'});
+    expect(stallAlerts()[0]!.lines[1]).toBe('Last evaluate error: none recorded');
+  });
+
+  it('is off at 0, and resolves a raised alert when turned off', async () => {
+    await addPost('t3_a', 'failed', 90);
+    await watch();
+    expect(stallAlerts()).toHaveLength(1);
+
+    await db.sql`UPDATE settings SET value = to_jsonb(0) WHERE key = 'eval_stall_alert_min'`;
+    await watch();
+
+    expect(stallAlerts()[1]).toMatchObject({status: 'resolved'});
   });
 });

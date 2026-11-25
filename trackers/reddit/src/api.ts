@@ -14,7 +14,7 @@ import {candidateConfig, liveConfig, promptHash, promptStats} from './prompts.ts
 import {createRule, deleteRule, listRules, updateRule} from './rules.ts';
 import {seen} from './seen.ts';
 import {createLogger, type Logger} from './logger.ts';
-import {isSettingKey, SETTING_KEYS, type SettingsStore} from './settings.ts';
+import {EVAL_STALL_MAX_MIN, isEvalStallMin, isSettingKey, SETTING_KEYS, type SettingsStore} from './settings.ts';
 import {sendMessage} from './telegram.ts';
 import {WEBHOOK_BODY_LIMIT_BYTES, webhookHandler} from './webhook.ts';
 
@@ -329,6 +329,17 @@ export function createApi(deps: ApiDeps): Hono {
 
   app.get('/api/settings', async (c) => c.json({settings: await deps.settings.all()}));
 
+  // One key, so a caller (the ERP proxy) can open a setting without the rest.
+  app.get('/api/settings/:key', async (c) => {
+    const key = c.req.param('key');
+    if (!isSettingKey(key)) {
+      return c.json({error: `unknown setting; expected one of ${SETTING_KEYS.join(', ')}`}, 400);
+    }
+    const value = (await deps.settings.all())[key];
+    if (value === undefined) return c.json({error: `${key} is not set`}, 404);
+    return c.json({key, value});
+  });
+
   app.put('/api/settings/:key', async (c) => {
     const key = c.req.param('key');
     if (!isSettingKey(key)) {
@@ -581,6 +592,10 @@ function validateSetting(key: string, value: unknown): string | null {
       return value === 'reddit' || value === 'webhook'
         ? null
         : 'poll_source must be "reddit" or "webhook"';
+    case 'eval_stall_alert_min':
+      return isEvalStallMin(value)
+        ? null
+        : `eval_stall_alert_min must be a whole number of minutes from 0 (off) to ${EVAL_STALL_MAX_MIN}`;
     default:
       return 'unknown setting';
   }

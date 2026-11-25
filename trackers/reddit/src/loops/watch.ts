@@ -10,13 +10,14 @@
 import type {Sql} from '../db.ts';
 import {DEAD_AFTER_S, problemText, type LoopFailures, type LoopName} from '../heartbeat.ts';
 import type {Logger} from '../logger.ts';
-import {parsePollSource} from '../settings.ts';
+import {parseEvalStallMin, parsePollSource} from '../settings.ts';
 
 /** A loop is failing after this many bad iterations in a row. */
 export const FAILING_AFTER = 3;
 /** With poll_source = 'webhook', no delivery for this long pages ops. */
 export const WEBHOOK_QUIET_AFTER_MIN = 90;
 const WEBHOOK_QUIET_KEY = 'webhook:quiet';
+const EVAL_STALLED_KEY = 'eval:stalled';
 /** watch_alerts.worker_id for an alert about the fleet rather than one worker. */
 const FLEET_ID = 'fleet';
 const DIGEST_BATCH = 200;
@@ -89,6 +90,8 @@ async function checkFleet(deps: WatchDeps): Promise<void> {
   const wanted = new Map<string, {workerId: string; title: string; lines: string[]}>();
   const quiet = await webhookQuiet(sql);
   if (quiet) wanted.set(WEBHOOK_QUIET_KEY, {workerId: FLEET_ID, ...quiet});
+  const stalled = await evalStalled(sql);
+  if (stalled) wanted.set(EVAL_STALLED_KEY, {workerId: FLEET_ID, ...stalled});
   for (const w of workers) {
     if (down.has(w.worker_id)) {
       wanted.set(`down:${w.worker_id}`, {
@@ -129,6 +132,16 @@ async function checkFleet(deps: WatchDeps): Promise<void> {
       const resolution = {
         title: 'Reddit webhook back',
         lines: ['Deliveries resumed, or poll_source is no longer webhook.'],
+      };
+      if (await post(deps, {topic: 'reddit_workers', status: 'resolved', ...resolution})) {
+        await sql`DELETE FROM watch_alerts WHERE key = ${r.key}`;
+      }
+      continue;
+    }
+    if (kind === 'eval') {
+      const resolution = {
+        title: 'Reddit evaluation resumed',
+        lines: ['Posts are being judged again, none is waiting, or the stall alert is off.'],
       };
       if (await post(deps, {topic: 'reddit_workers', status: 'resolved', ...resolution})) {
         await sql`DELETE FROM watch_alerts WHERE key = ${r.key}`;
@@ -178,6 +191,47 @@ async function webhookQuiet(sql: Sql): Promise<{title: string; lines: string[]} 
       'The poll loop is idle, so no new posts are coming in.',
       'Run `pnpm redditapis status` for the vendor monitor\'s health, and the api log for "webhook" lines.',
       'Setting poll_source back to reddit helps only with REDDIT_CLIENT_ID set: anonymous Reddit feeds are gone.',
+    ],
+  };
+}
+
+/**
+ * The stall alert: a post discovered after the newest judged one has waited
+ * longer than eval_stall_alert_min. The failing-loop alert misses a dead
+ * provider key, because an iteration with nothing to claim is clean and the
+ * streak restarts between posts; this one watches outcomes. Posts have no
+ * evaluated-at, so discovery order stands in for it, which also lets the next
+ * judged post outrun one post that always errors.
+ */
+async function evalStalled(sql: Sql): Promise<{title: string; lines: string[]} | null> {
+  const [setting] = await sql<Array<{value: unknown}>>`
+    SELECT value FROM settings WHERE key = 'eval_stall_alert_min'`;
+  const limitMin = parseEvalStallMin(setting?.value);
+  if (limitMin === 0) return null;
+  const [row] = await sql<Array<{waiting: number; stalled_s: number | null}>>`
+    SELECT COUNT(*)::int AS waiting,
+           EXTRACT(EPOCH FROM NOW() - MIN(discovered_at))::float8 AS stalled_s
+      FROM posts
+     WHERE status IN ('new', 'failed')
+       AND discovered_at > COALESCE(
+             (SELECT MAX(discovered_at) FROM posts
+               WHERE status IN ('rejected', 'target', 'notified')),
+             '-infinity')`;
+  const stalledS = row?.stalled_s ?? null;
+  if (stalledS === null || stalledS < limitMin * 60) return null;
+  const [last] = await sql<Array<{error: string | null}>>`
+    SELECT loop_failures->'evaluate'->>'lastError' AS error
+      FROM workers
+     WHERE loop_failures->'evaluate'->>'lastErrorAt' IS NOT NULL
+     ORDER BY loop_failures->'evaluate'->>'lastErrorAt' DESC
+     LIMIT 1`;
+  return {
+    title: 'Reddit evaluation stalled',
+    lines: [
+      `No post has been judged for ${minutes(stalledS)}; ${row!.waiting} waiting or failed since.`,
+      `Last evaluate error: ${last?.error ?? 'none recorded'}`,
+      'The usual cause is a provider key that is refused or out of credit: check ERP Settings ▸ AI models.',
+      `Threshold ${limitMin} min, set on the ERP's Reddit page (Workflow ▸ Evaluate).`,
     ],
   };
 }
