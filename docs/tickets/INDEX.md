@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-613](./RS-613-send-selected-inventory-lots-to-ebay.md) | done | task | P2 | Send selected Inventory lots to eBay | 1.480.0 |
 | [RS-612](./RS-612-ai-provider-keys-and-default-model-set-only-in-the-u.md) | done | task | P2 | AI provider keys and default model set only in the UI | 1.479.0 |
 | [RS-611](./RS-611-send-to-ebay-from-the-inventory-list.md) | done | task | P2 | Send to eBay from the Inventory list | 1.478.0 |
 | [RS-610](./RS-610-ebay-api-publish-listings-and-sync-sold-orders.md) | done | story | P2 | eBay API: publish listings and sync sold orders | 1.477.0 |

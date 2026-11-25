@@ -25,6 +25,8 @@ import { TableSkeleton } from '../../components/Skeleton';
 import { SerialNumbers } from '../../components/SerialNumbers';
 import { RefinePanel } from '../../components/RefinePanel';
 import { InventoryProductTable } from './InventoryProductTable';
+import { BulkSendToEbayDialog, type BulkEbayLot } from './ebay/BulkSendToEbay';
+import { lineSpecLabel } from '../../lib/lineGroups';
 import type { ProductGroup, ProductLot } from './InventoryProductTable';
 import { loadWarehouses } from '../../lib/warehouses';
 import { rememberSelectedRows, resolveSelectedRows } from '../../lib/inventorySelection';
@@ -611,6 +613,17 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
     setDraftItems(buildDraftItems(selectedItems));
   };
 
+  const [ebayLots, setEbayLots] = useState<BulkEbayLot[] | null>(null);
+  const openSendToEbay = () => {
+    if (!selectedItems.length) return;
+    setEbayLots(selectedItems.map(r => ({
+      id: r.id,
+      lotRef: r.po_line_no != null ? `${r.order_id} #${r.po_line_no}` : r.order_id,
+      spec: lineSpecLabel(r) ?? r.description ?? r.part_number ?? '',
+      price: r.sell_price,
+    })));
+  };
+
   const openTransferModal = () => {
     if (!selectedItems.length) return;
     setTransferItems(buildTransferItems(selectedItems));
@@ -993,6 +1006,9 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
               </button>
             )}
             <button className="btn ghost" onClick={clearSelection}>Clear</button>
+            <button className="btn" onClick={openSendToEbay}>
+              <Icon name="package" size={14} /> {t('ebSendTitle')}
+            </button>
             <button className="btn" onClick={openTransferModal}>
               <Icon name="truck" size={14} /> {t('transfer')}
             </button>
@@ -1033,6 +1049,23 @@ export function DesktopInventory({ onEditItem, showToast }: Props) {
             });
             setAddToOrder(null);
             navigate('/sell-orders/' + id);
+          }}
+        />
+      )}
+
+      {ebayLots && (
+        <BulkSendToEbayDialog
+          lots={ebayLots}
+          onClose={() => setEbayLots(null)}
+          onSent={(ids, sentLotIds, all) => {
+            setSelected(prev => {
+              const next = new Set(prev);
+              for (const id of sentLotIds) next.delete(id);
+              return next;
+            });
+            if (all) setEbayLots(null);
+            refetchInventory();
+            showToast?.(all ? t('ebToastSent', { ids: ids.join(', ') }) : t('ebBulkSentSome', { ids: ids.join(', ') }), 'success');
           }}
         />
       )}
