@@ -364,6 +364,42 @@ describe('bank transaction sync', () => {
     expect(rows.get('m-other')!.category).toBe('external');
   });
 
+  // Mercury names a "PAYPAL *name" card charge's counterparty PayPal, so a
+  // rule taught on a PayPal ACH move used to catch vendor payments too.
+  it('a counterparty rule leaves PayPal card charges and paired legs external', async () => {
+    const db = getTestDb();
+    await db`
+      INSERT INTO bank_transfer_counterparties (source, counterparty)
+      VALUES ('mercury', 'PayPal')`;
+    const paypal = { externalId: TXN_A, amount: -4800, counterparty: 'James', postedAt: new Date(NOW - 3 * DAY) };
+    const card = { externalId: 'm-card', amount: -4800, counterparty: 'PayPal', description: 'PAYPAL *JAY' };
+    // The charge pairs while pending, which the rule skips; it then settles.
+    await syncBankTransactions(testEnv, [
+      fakeProvider('paypal', [paypal]),
+      fakeProvider('mercury', [{ ...card, settleStatus: 'pending' }]),
+    ]);
+    expect((await legs()).get('m-card')!.pair_id).not.toBeNull();
+    await syncBankTransactions(testEnv, [
+      fakeProvider('paypal', [paypal]),
+      fakeProvider('mercury', [
+        card,
+        { externalId: 'm-card2', amount: -75, counterparty: 'PayPal', description: 'PAYPAL *SOMEONE' },
+        { externalId: 'm-ach', amount: -500, counterparty: 'PayPal', description: 'PAYPAL; TRANSFER; RECYCLE' },
+        { externalId: 'm-other', amount: -60, counterparty: 'PayPal', description: 'PayPal Inc' },
+      ]),
+    ]);
+    const rows = await legs();
+    expect(rows.get('m-card')!.category).toBe('external');
+    expect(rows.get('m-card2')!.category).toBe('external');
+    expect(rows.get('m-ach')!.category).toBe('transfer');
+    expect(rows.get('m-other')!.category).toBe('transfer');
+
+    const { token } = await loginAs(ALEX);
+    const [{ id }] = await db<{ id: string }[]>`SELECT id FROM bank_transactions WHERE external_id = ${TXN_A}`;
+    const r = await api('POST', `/api/bank-transactions/${id}/link`, { token, body: { orderId: await createPO() } });
+    expect(r.status).toBe(200);
+  });
+
   it('never transfer-pairs a Mercury leg that is already a transfer itself', async () => {
     // A Savings->Checking move's sibling is the other Mercury account, not a
     // same-amount PayPal funding credit that happens to be in the window.

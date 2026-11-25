@@ -12,8 +12,8 @@ import type { TransactionSql } from 'postgres';
 import { authMiddleware } from '../auth';
 import { requireManager } from '../lib/role';
 import {
-  fetchCandidates, groupSettleFrag, hasMatchFrag, isLinked, matchSummaries, openRowFrag,
-  pairCandidatesBatch, unlinkedFrag, PAIR_AUTO_WINDOW_DAYS, PAIR_PICK_WINDOW_DAYS,
+  counterpartyRuleTargetFrag, fetchCandidates, groupSettleFrag, hasMatchFrag, isLinked,
+  matchSummaries, openRowFrag, pairCandidatesBatch, unlinkedFrag, PAIR_AUTO_WINDOW_DAYS, PAIR_PICK_WINDOW_DAYS,
   type MatchLeg, type PairCandidate, type PairLeg,
 } from '../banktx/match';
 import { applyIgnoreRules, ignoreRuleMatchFrag, revertIgnoreRule } from '../banktx/ignoreRules';
@@ -554,8 +554,12 @@ bankTx.post('/:id/link', async (c) => {
         throw new BankRefusal(400, 'Remove the transaction from its internal transaction before linking it');
       }
       // Money moved between our own accounts paid no one; the PayPal leg of the
-      // same payment is what links.
-      if (group.some((l) => l.category === 'transfer')) {
+      // same payment is what links. A pair is judged by its PayPal leg, as the
+      // list and the tiles read it: a Mercury leg that PayPal pulled by ACH
+      // ("PAYPAL; PURCHASE") to fund this very payment is a transfer on the
+      // bank's side, and the payment it funded still has a PO.
+      const shown = group.find((l) => l.source === 'paypal') ?? group[0];
+      if (shown.category === 'transfer') {
         throw new BankRefusal(400, 'A transfer cannot be linked to an order');
       }
 
@@ -1038,10 +1042,7 @@ bankTx.post('/:id/mark-transfer', async (c) => {
         const updated = await tx`
           UPDATE bank_transactions SET category = 'transfer'
           WHERE source = ${r.source} AND counterparty = ${r.counterparty}
-            AND category = 'external' AND NOT category_manual AND ${unlinkedFrag(tx, 'bank_transactions')}
-            -- Money that never moved is not a transfer, and reclassifying it
-            -- would count it in the Transfers tile it is kept out of.
-            AND settle_status = 'settled'`;
+            AND ${counterpartyRuleTargetFrag(tx, 'bank_transactions')}`;
         alsoMarked += updated.count;
       }
       return { ruleCounterparty: rules[0]?.counterparty ?? null, alsoMarked };

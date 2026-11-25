@@ -2602,6 +2602,10 @@ it.
   is remembered while you are elsewhere, like the filters.
 - **Internal Mercury↔PayPal transfers are classified out of the unlinked
   queue** (v1.93.0) by counterparty and Mercury kind rules (v1.94.0).
+  A taught counterparty never takes a `PAYPAL *name` card charge (Mercury
+  calls their counterparty "PayPal" too) or a leg that is already paired, and
+  a pair links by its PayPal leg, so a payment PayPal funded by an ACH pull
+  still links to its PO (v1.482.1).
 - **Automatic pairing is stricter about what it guesses** (v1.198.3).
   - An amount-and-date pair needs the Mercury row to name PayPal (its card
     descriptor or counterparty), and a transfer pair needs the `PAYPAL;` ACH

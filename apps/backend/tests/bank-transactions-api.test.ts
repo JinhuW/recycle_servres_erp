@@ -238,6 +238,55 @@ describe('bank transactions API', () => {
     expect(reverted.every((r) => r.category === 'external')).toBe(true);
   });
 
+  it('links a payment pair whose Mercury leg is the ACH that funded it', async () => {
+    await seedPairedAndSingles();
+    // What the provider says of a "PAYPAL; PURCHASE" ACH pull.
+    await getTestDb()`UPDATE bank_transactions SET category = 'transfer' WHERE external_id = 'm-settle'`;
+    const { token } = await loginAs(ALEX);
+    const poId = await createPO(token);
+    const r = await api('POST', `/api/bank-transactions/${await idOf(TXN_A)}/link`, { token, body: { orderId: poId } });
+    expect(r.status).toBe(200);
+    const rows = await getTestDb()`SELECT order_id FROM bank_transactions WHERE external_id IN (${TXN_A}, 'm-settle')`;
+    expect(rows.every((row) => row.order_id === poId)).toBe(true);
+
+    // A pair whose PayPal leg is the transfer is still refused.
+    await getTestDb()`
+      UPDATE bank_transactions SET order_id = NULL, link_kind = NULL, linked_by = NULL, linked_at = NULL`;
+    await getTestDb()`UPDATE bank_transactions SET category = 'transfer' WHERE external_id = ${TXN_A}`;
+    const refused = await api('POST', `/api/bank-transactions/${await idOf(TXN_A)}/link`, { token, body: { orderId: poId } });
+    expect(refused.status).toBe(400);
+  });
+
+  it('a taught PayPal counterparty skips card charges and paired payment legs', async () => {
+    await syncBankTransactions(testEnv, [
+      fakeProvider('paypal', [
+        { externalId: TXN_A, amount: -4800, counterparty: 'James', postedAt: new Date(NOW - 3 * DAY) },
+      ]),
+      fakeProvider('mercury', [
+        { externalId: 'm-pp-ach', amount: -500, counterparty: 'PayPal', description: 'PAYPAL; TRANSFER; RECYCLE' },
+        { externalId: 'm-pp-ach2', amount: -700, counterparty: 'PayPal', description: 'PAYPAL; TRANSFER; RECYCLE' },
+        { externalId: 'm-pp-card', amount: -75, counterparty: 'PayPal', description: 'PAYPAL *SOMEONE' },
+        // Pairs with TXN_A by amount and date, before the rule exists.
+        { externalId: 'm-pp-paired', amount: -4800, counterparty: 'PayPal', description: 'PayPal Inc' },
+      ]),
+    ]);
+    const db = getTestDb();
+    expect((await db`SELECT pair_id FROM bank_transactions WHERE external_id = 'm-pp-paired'`)[0].pair_id).not.toBeNull();
+    // Unclassify the ACH rows so only the rule can make them transfers again.
+    await db`UPDATE bank_transactions SET category = 'external' WHERE external_id IN ('m-pp-ach', 'm-pp-ach2')`;
+    const { token } = await loginAs(ALEX);
+
+    const mark = await api<{ alsoMarked: number }>(
+      'POST', `/api/bank-transactions/${await idOf('m-pp-ach')}/mark-transfer`, { token });
+    expect(mark.status).toBe(200);
+    expect(mark.body.alsoMarked).toBe(1); // m-pp-ach2 only
+    const cats = Object.fromEntries((await db<{ external_id: string; category: string }[]>`
+      SELECT external_id, category FROM bank_transactions`).map((r) => [r.external_id, r.category]));
+    expect(cats).toMatchObject({
+      'm-pp-ach2': 'transfer', 'm-pp-card': 'external', 'm-pp-paired': 'external', [TXN_A]: 'external',
+    });
+  });
+
   it('keyset-paginates without skips or duplicates', async () => {
     const txns: TxnSpec[] = Array.from({ length: 5 }, (_, i) => ({
       externalId: `m-${i}`, amount: -(i + 1), postedAt: new Date(NOW - i * DAY),

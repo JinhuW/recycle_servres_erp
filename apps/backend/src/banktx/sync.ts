@@ -11,7 +11,7 @@ import { log } from '../lib/log';
 import type { Env } from '../types';
 import { applyIgnoreRules } from './ignoreRules';
 import { pickBankProviders, type BankProviderPick } from './index';
-import { PAIR_AUTO_WINDOW_DAYS, isLinked, unlinkedFrag } from './match';
+import { PAIR_AUTO_WINDOW_DAYS, counterpartyRuleTargetFrag, isLinked, unlinkedFrag } from './match';
 import { PAYPAL_ACH_DESCRIPTOR } from './mercury';
 import type { BankProvider, BankSource, NormalizedDispute, NormalizedTxn } from './types';
 
@@ -362,10 +362,7 @@ async function syncOne(
       UPDATE bank_transactions bt SET category = 'transfer'
       FROM bank_transfer_counterparties r
       WHERE bt.source = r.source AND bt.counterparty = r.counterparty
-        AND bt.category = 'external' AND NOT bt.category_manual AND ${unlinkedFrag(tx, 'bt')}
-        -- Money that never moved is not a transfer; reclassifying it would put
-        -- it back into a tile it is deliberately kept out of.
-        AND bt.settle_status = 'settled'`;
+        AND ${counterpartyRuleTargetFrag(tx, 'bt')}`;
 
     // Only PayPal rows carry a case. The Mercury settlement leg parses the same
     // paypal_txn_id out of its description, so without this filter a pair that

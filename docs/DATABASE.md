@@ -8,7 +8,7 @@ writes each column. Self-explanatory columns (ids, timestamps) are left blank
 on purpose. Any other blank meaning is one that neither the SQL nor the code
 made clear enough to state.
 
-**As of 2026-11-24:** ERP migration `0256`, Reddit tracker migration `0012`,
+**As of 2026-11-25:** ERP migration `0257`, Reddit tracker migration `0012`,
 Facebook tracker `0.13.18`. *Keeping this file current* at the end says how to
 refresh a section.
 
