@@ -143,7 +143,7 @@ together with its other side (root AGENTS.md → *Contracts*).
   `csrfGuard` middleware drops it otherwise with 403).  Exempt: safe methods,
   `/api/health`, and `/api/public/*` (the unauthenticated website intake and
   quote forms and the Shippo webhook — no cookies, so CSRF doesn't apply).
-- **Three path lists are kept by hand; a new route has to join the ones that
+- **Two path lists are kept by hand; a new route has to join the ones that
   fit it.**  Nothing derives them from the router, so a missed entry fails
   quietly in production:
   - `exempt()` in `csrf.ts`: bearer-only machine surfaces with no cookie.
@@ -152,8 +152,6 @@ together with its other side (root AGENTS.md → *Contracts*).
     not listed gets the 1 MiB JSON body cap, so a phone photo or PDF 413s
     before the handler's own upload limits run.  `tests/body-limit.test.ts`
     covers the listed routes.
-  - `isMachineRoute()` in `routes/perf.ts`: callers no person waits on, kept
-    out of the user-facing latency figures.
 - Refresh-token reuse revokes the whole family.  Don't relax that.
 - A password change or reset stamps `users.tokens_valid_after`
   (app-clock second); `authMiddleware` and `bearerGuard` refuse any token whose

@@ -8,7 +8,7 @@ writes each column. Self-explanatory columns (ids, timestamps) are left blank
 on purpose. Any other blank meaning is one that neither the SQL nor the code
 made clear enough to state.
 
-**As of 2026-11-24:** ERP migration `0255`, Reddit tracker migration `0012`,
+**As of 2026-11-25:** ERP migration `0257`, Reddit tracker migration `0012`,
 Facebook tracker `0.13.18`. *Keeping this file current* at the end says how to
 refresh a section.
 
@@ -76,7 +76,7 @@ isolation boundary (`trackers/facebook/infra/README.md`).
   2. It sets dev's Facebook fleet aside in a `sync_keep` schema
      (`keep-fleet.sql`): every `fleet_*` table, and for each pool account
      with a `fleet_slots` row its `*_enc` columns, `cookie_uid`, `cookie_at`,
-     `status`, `note` and browser profile, plus `perf_rollups`, so dev's timing stays dev's own.
+     `status`, `note` and browser profile, plus the approved `fb_chat_devices`.
      Then it resets dev's schema wholesale and restores
      prod's dump.
   3. It runs `scrub.sql` in the same transaction. That truncates the live
@@ -3227,7 +3227,7 @@ A card's timeline, written in the same transaction as the change. Comments are `
 
 Workspace-wide configuration and plumbing: key/value settings (workspace_settings), the counters behind human-readable ids such as PO-1289 (id_counters), and the migration runner's ledger (schema_migrations).
 
-Tables: [`workspace_settings`](#erp-workspace-settings), [`ai_provider_keys`](#erp-ai-provider-keys), [`ai_provider_key_removals`](#erp-ai-provider-key-removals), [`id_counters`](#erp-id-counters), [`schema_migrations`](#erp-schema-migrations), [`perf_rollups`](#erp-perf-rollups)
+Tables: [`workspace_settings`](#erp-workspace-settings), [`ai_provider_keys`](#erp-ai-provider-keys), [`ai_provider_key_removals`](#erp-ai-provider-key-removals), [`id_counters`](#erp-id-counters), [`schema_migrations`](#erp-schema-migrations)
 
 <a id="erp-workspace-settings"></a>
 
@@ -3310,29 +3310,6 @@ Ledger of applied migrations, written by scripts/migrate.mjs at boot: one row pe
 - **Primary key:** `filename`
 
 Keyed by file name, so an edited file that was already applied never runs again; the runner only logs a warning when its checksum differs.
-
-<a id="erp-perf-rollups"></a>
-
-#### `perf_rollups`
-
-Hourly timing histograms per release, written by lib/perf.ts about once a minute and at shutdown, read by /api/perf/* for Settings ▸ Performance. Rows older than 400 days are purged daily. No row holds a user identity, an id or a raw path. Dev keeps its own rows through the nightly prod copy.
-
-| Column | Type | Not null | Default | Meaning |
-| --- | --- | :-: | --- | --- |
-| `bucket` | `timestamptz` | ✓ |  | The hour the samples fall in. |
-| `version` | `text` | ✓ |  | Release that served them, from releaseVersion(). |
-| `kind` | `text` | ✓ |  | `http` for a backend request, `client` for a browser load report. |
-| `name` | `text` | ✓ |  | `http`: method and matched route pattern, e.g. `GET /api/orders/:id`. `client`: `metric\|shell\|page`, e.g. `lcp\|desktop\|inventory`, from closed lists. |
-| `count` | `bigint` | ✓ |  | Samples. |
-| `errors` | `bigint` | ✓ | `0` | Of those, responses with a 5xx status. Always 0 for `client`. |
-| `sum_ms` | `double precision` | ✓ |  | Total milliseconds. |
-| `max_ms` | `double precision` | ✓ |  | Slowest sample. |
-| `buckets` | `bigint[]` | ✓ |  | One count per bound in PERF_BUCKETS_MS, plus a last one for anything above the top. |
-
-- **Primary key:** `bucket`, `version`, `kind`, `name`
-- **Index:** `perf_rollups_version_idx` on `version`, `kind`
-
-Rows are summed index by index, so changing PERF_BUCKETS_MS needs a migration that rewrites `buckets`.
 
 ### SQL functions
 

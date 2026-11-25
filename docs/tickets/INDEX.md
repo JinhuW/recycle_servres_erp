@@ -5,7 +5,9 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-614](./RS-614-reddit-evaluation-stall-alert-threshold-set-in-the-e.md) | in-review | story | P2 | Reddit evaluation stall alert, threshold set in the ERP | 1.481.0 |
+| [RS-616](./RS-616-paypal-payments-refused-as-transfers-when-linking-to.md) | done | bug | P1 | PayPal payments refused as transfers when linking to a PO | — |
+| [RS-615](./RS-615-expose-performance-as-prometheus-metrics-instead-of.md) | done | story | P2 | Expose performance as Prometheus metrics instead of in the ERP | 1.482.0 |
+| [RS-614](./RS-614-reddit-evaluation-stall-alert-threshold-set-in-the-e.md) | done | story | P2 | Reddit evaluation stall alert, threshold set in the ERP | 1.481.0 |
 | [RS-613](./RS-613-send-selected-inventory-lots-to-ebay.md) | done | task | P2 | Send selected Inventory lots to eBay | 1.480.0 |
 | [RS-612](./RS-612-ai-provider-keys-and-default-model-set-only-in-the-u.md) | done | task | P2 | AI provider keys and default model set only in the UI | 1.479.0 |
 | [RS-611](./RS-611-send-to-ebay-from-the-inventory-list.md) | done | task | P2 | Send to eBay from the Inventory list | 1.478.0 |

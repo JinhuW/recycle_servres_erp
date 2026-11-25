@@ -11,8 +11,6 @@
 -- columns dev owns (every *_enc, cookie_uid, cookie_at, status, note, the
 -- browser profile, and the holder: a worker's token is only good while the
 -- account names it as holder).
--- Also perf_rollups: dev's timing is the evidence for dev's releases, and prod's
--- rows would merge into it wherever both ran the same version.
 -- Also fb_chat_devices: the chat bridge extensions a manager approved on dev.
 -- Prod's copy would replace them, and each extension would wait for approval
 -- again every morning.
@@ -42,7 +40,7 @@ BEGIN
     SELECT cl.relname FROM pg_catalog.pg_class cl
     JOIN pg_catalog.pg_namespace n ON n.oid = cl.relnamespace
     WHERE n.nspname = 'public' AND cl.relkind IN ('r', 'p')
-      AND (cl.relname LIKE 'fleet\_%' OR cl.relname IN ('perf_rollups', 'fb_chat_devices'))
+      AND (cl.relname LIKE 'fleet\_%' OR cl.relname = 'fb_chat_devices')
   LOOP
     EXECUTE pg_catalog.format('CREATE TABLE sync_keep.%I AS TABLE public.%I', t.relname, t.relname);
   END LOOP;
