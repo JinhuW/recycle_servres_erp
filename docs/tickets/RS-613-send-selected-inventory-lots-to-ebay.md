@@ -7,7 +7,7 @@ priority: P2
 created: 2026-11-24
 reporter: jinhu
 branch: feat-ebay-bulk-send
-pr:
+pr: 1257
 version: 1.480.0
 related: [RS-609, RS-611]
 ---
