@@ -1010,6 +1010,9 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     payLedgerNet: 'Net paid',
     payLedgerNetReceived: 'Net received',
     payLinkOpen: "Open this PO's payments",
+    colCostPayment: 'Cost payment',
+    colCommissionPayment: 'Commission payment',
+    acctOpenForPo: "Open this PO's entries in Accounting",
     // The bank's net paid against the PO's goods + fees, warned of in Review
     // mode and on the PO page, and asked about before approving for payment.
     payGapBanner: "Payment doesn't match the total cost: the bank paid {paid}, the PO totals {total}",

@@ -879,6 +879,20 @@ A purchaser can drag only their own Draft.
   in the Columns picker and on by default. Unlike Total cost above,
   migration 0188 added it to every saved column list, so nobody has to tick
   it on.
+- **Cost payment and Commission payment chips** (v1.484.0, RS-618). The
+  Payment, Commission and Paid by columns became two: *Cost payment*, right
+  after Total cost, and *Commission payment*. Each is one chip, `payer |
+  amount`. Cost payment names who paid the supplier (*Business*, a person, or
+  *Self-paid*). For a manager its amount is the bank-linked total in $ or,
+  without one, what the RMB Flow has booked toward the cost in ¥ (the list's
+  `acctPaidCost`, voided entries left out). Commission payment names who paid
+  the commission (*Not recorded* until someone has) beside the commission
+  itself, for every role. For a manager each chip opens Accounting filtered
+  to that PO and kind, purchase or commission, over all dates
+  (`/accounting?po=…&kind=…`). A bank-paid one also has a small cash icon
+  that opens the PO's rows on Payments. The column ids stayed `payment` and
+  `commission`, so saved column lists still work. The old Paid by column
+  below has been folded into Commission payment.
 - **The cost's Paid by names who paid the supplier** (v1.317.0): the
   **Business Account** — the company's Mercury and PayPal money, the only
   kind the Payments page links to a PO — or **a person**, any active manager

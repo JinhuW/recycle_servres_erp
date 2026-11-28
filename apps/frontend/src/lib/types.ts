@@ -209,6 +209,10 @@ export type OrderSummary = {
   // for a non-manager. Either way there is no link to draw and no payment gap
   // to warn of. Optional for the same deploy-skew reason as `txnRequired`.
   linkedPaid?: number | null;
+  // What the RMB book has paid toward the cost, net, in CNY: the voided
+  // entries left out. Managers only, absent otherwise and from an older
+  // backend; 0 when nothing is booked.
+  acctPaidCost?: number | null;
   warehouse: Warehouse | null;
   qty: number;
   // Priced lines only — an unpriced line contributes no revenue and no margin,
