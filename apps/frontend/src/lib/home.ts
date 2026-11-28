@@ -46,6 +46,7 @@ export function managerTiles(m: ManagerHome): AttentionTile[] {
     { key: 'readyToPay', labelKey: 'homeTileReadyToPay', count: m.readyToPay.count, to: poStagePath('ready_to_pay') },
     { key: 'signoffs', labelKey: 'homeTileSignoffs', count: m.signoffs.count, to: '/sell-orders' },
     { key: 'unlinked', labelKey: 'homeTileUnlinked', count: m.bank.unlinked, to: '/payments' },
+    { key: 'cashFlow', labelKey: 'homeTileCashFlow', count: m.cashFlow?.count ?? 0, to: '/accounting' },
     { key: 'rmb', labelKey: 'homeTileRmb', count: m.rmb.forMe + m.rmb.asked, to: ACCOUNTING_REVIEW_PATH },
   ];
 }

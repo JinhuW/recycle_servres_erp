@@ -894,8 +894,9 @@ A purchaser can drag only their own Draft.
   `commission`, so saved column lists still work. The old Paid by column
   below has been folded into Commission payment.
   Since v1.485.0 (RS-619), a manager's chip shows a small amber **?** when
-  it names a person but nothing backs the payment: a cost whose *Paid by* is
-  a person, with no RMB Flow entry and no bank row linked, or a commission
+  it names a manager but nothing backs the payment: a cost whose *Paid by* is
+  a manager (since v1.486.0; a purchaser who paid their own PO is not
+  flagged), with no RMB Flow entry and no bank row linked, or a commission
   paid by a manager with no commission entry. The tooltip says to record it
   in Accounting, and the chip itself opens there. The Business Account, the
   legacy *Self-paid*, and *Not recorded* never get one. The list sends
@@ -3304,13 +3305,20 @@ every two minutes.
 - **Managers:**
   - Tiles for arriving today or tomorrow, packages needing a hand, POs in
     review, purchaser edits to check, commission to pay, sell orders to sign
-    off, unlinked payments out, and RMB Flow for them.
+    off, unlinked payments out, cash flow to add (v1.486.0), and RMB Flow
+    for them.
   - The review queue, oldest first, with box-check progress, open AI findings
     (error and warn) and who has it, plus unacknowledged reverts.
   - Inbound packages, problems first, then by ETA; pickups in transit are
     counted too.
   - Money to move: Ready to Pay and its commission, sell orders awaiting
-    payment, unlinked payments, disputes.
+    payment, unlinked payments, disputes. Since v1.486.0 (RS-620) it also
+    lists the **manager payments with no cash flow**: a self-paid PO's cost
+    whose Paid by is a manager (not its purchaser), with no live RMB Flow
+    purchase entry and no linked bank row, and a commission a manager paid,
+    with no live commission entry. The viewer's own come first, marked *You*.
+    Each row opens Accounting filtered to that PO and kind. The phone shows
+    it as one row that opens Accounting.
   - The sales pipeline: drafts (connector-made ones counted), Packing
     progress, and the Shipped / Awaiting payment orders this manager has not
     signed as they stand.

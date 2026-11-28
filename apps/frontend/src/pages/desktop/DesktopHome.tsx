@@ -8,7 +8,7 @@ import { useEffectiveUser } from '../../lib/tweaks';
 import { fmtCalendarDayShort, fmtDateShort, fmtUSD0 } from '../../lib/format';
 import { LIFECYCLE_STATUS, statusTone, WORKFLOW_STAGES } from '../../lib/status';
 import { NEED_SHORT_KEY, SERVER_BLOCKER_KEY } from '../../lib/poReadiness';
-import { ACCOUNTING_REVIEW_PATH, ACTIONS_PATH, actionPath } from '../../lib/route';
+import { ACCOUNTING_REVIEW_PATH, ACTIONS_PATH, accountingForOrderPath, actionPath } from '../../lib/route';
 import { actionsApi, STATUS_KEY } from '../../lib/actions';
 import {
   ageTone, daysSince, managerTiles, poStagePath, sellStatusPath, useHomeData,
@@ -237,6 +237,25 @@ function ManagerView({ m }: { m: ManagerHome }) {
               <MoneyRow to="/payments" label={t('homeDisputesN', { n: m.bank.disputes })} icon="alert" tone="neg" />
             )}
           </div>
+          {/* A manager's payment on a PO with nothing in the books behind it:
+              the one who paid books it, so each row opens that entry's view. */}
+          {m.cashFlow && m.cashFlow.count > 0 && (
+            <div className="home-list">
+              <div className="home-list-h">
+                <Icon name="alert" size={12} style={{ color: 'var(--warn-strong)', marginRight: 4 }} />
+                {t('homeCashFlowN', { n: m.cashFlow.count, mine: m.cashFlow.mine })}
+              </div>
+              {m.cashFlow.items.map(c => (
+                <RouteLink key={c.id + c.kind} to={accountingForOrderPath(c.id, c.kind)} className="home-list-row"
+                           title={t('payerUnbackedHint')}>
+                  <span className="home-list-main">
+                    <span className="mono">{c.id}</span> · {t(c.kind === 'purchase' ? 'homeCashFlowCost' : 'homeCashFlowCommission')}
+                  </span>
+                  <span className={'home-list-meta' + (c.mine ? ' warn' : '')}>{c.mine ? t('homeYou') : c.payer}</span>
+                </RouteLink>
+              ))}
+            </div>
+          )}
         </Card>
 
         <Card title={t('homeSales')}>
