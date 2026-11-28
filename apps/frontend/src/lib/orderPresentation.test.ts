@@ -196,16 +196,18 @@ describe('trackingNote', () => {
 
 describe('payerUnbacked', () => {
   const lina = { id: 'u1' };
-  const cost = { payment: 'self' as const, paidBy: lina, linkedPaid: null, acctPaidCost: 0 };
-  it('flags a person-paid cost with no RMB entry and no bank row', () => {
+  const cost = { userId: 'p1', payment: 'self' as const, paidBy: lina, linkedPaid: null, acctPaidCost: 0 };
+  it('flags a manager-paid cost with no RMB entry and no bank row', () => {
     expect(payerUnbacked(cost, 'purchase')).toBe(true);
     expect(payerUnbacked({ ...cost, acctPaidCost: 1450 }, 'purchase')).toBe(false);
     expect(payerUnbacked({ ...cost, linkedPaid: 400 }, 'purchase')).toBe(false);
     expect(payerUnbacked({ ...cost, payment: 'company', paidBy: null }, 'purchase')).toBe(false);
     expect(payerUnbacked({ ...cost, paidBy: null }, 'purchase')).toBe(false);
+    // The purchaser paid it themselves: not a manager's money.
+    expect(payerUnbacked({ ...cost, paidBy: { id: 'p1' } }, 'purchase')).toBe(false);
   });
   it('flags a manager-paid commission with no RMB entry', () => {
-    const c = { payment: 'company' as const, commissionPaidBy: { kind: 'manager' as const }, acctPaidCommission: 0 };
+    const c = { userId: 'p1', payment: 'company' as const, commissionPaidBy: { kind: 'manager' as const }, acctPaidCommission: 0 };
     expect(payerUnbacked(c, 'commission')).toBe(true);
     expect(payerUnbacked({ ...c, acctPaidCommission: 100 }, 'commission')).toBe(false);
     expect(payerUnbacked({ ...c, commissionPaidBy: { kind: 'company' as const } }, 'commission')).toBe(false);
@@ -213,6 +215,6 @@ describe('payerUnbacked', () => {
   });
   it('never flags for a reader without the figures', () => {
     expect(payerUnbacked({ ...cost, acctPaidCost: undefined }, 'purchase')).toBe(false);
-    expect(payerUnbacked({ payment: 'self', commissionPaidBy: { kind: 'manager' } }, 'commission')).toBe(false);
+    expect(payerUnbacked({ userId: 'p1', payment: 'self', commissionPaidBy: { kind: 'manager' } }, 'commission')).toBe(false);
   });
 });

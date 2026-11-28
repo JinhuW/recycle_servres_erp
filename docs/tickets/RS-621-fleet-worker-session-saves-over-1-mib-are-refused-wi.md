@@ -1,5 +1,5 @@
 ---
-id: RS-620
+id: RS-621
 title: Fleet worker session saves over 1 MiB are refused with 413
 type: bug
 status: in-review
@@ -8,7 +8,7 @@ created: 2026-11-28
 reporter: nightly-railway-inspection
 branch: fix/fleet-session-body-cap
 pr: 1267
-version: 1.485.1
+version: 1.486.1
 related: [RS-419]
 ---
 

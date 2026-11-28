@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { resetDb, getTestDb } from './helpers/db';
 import { api } from './helpers/app';
-import { loginAs, ALEX, MARCUS, PRIYA } from './helpers/auth';
+import { loginAs, ALEX, MARCUS, PRIYA, SOFIA } from './helpers/auth';
 import { orderFingerprint } from '../src/services/sellOrderSignoff';
 
 // GET /api/home — what waits on the viewer. Scoping follows effectiveRole,
@@ -28,6 +28,7 @@ type ManagerHome = {
     signoffs: { count: number; items: { id: string }[] };
     bank: { unlinked: number; unlinkedAmount: number; disputes: number };
     rmb: { forMe: number; asked: number };
+    cashFlow: { count: number; mine: number; items: { id: string; kind: string; payer: string; mine: boolean }[] };
   };
   purchaser?: unknown;
 };
@@ -89,6 +90,50 @@ describe('GET /api/home', () => {
       'GET', '/api/packages/inbound-counts?mine=true', { token: marcus.token });
     expect({ moving: r.body.purchaser.packages.moving, needs: r.body.purchaser.packages.needs })
       .toEqual(counts.body);
+  });
+
+  it('reminds managers of a manager\'s payment no cash flow backs, theirs first', async () => {
+    const marcus = await loginAs(MARCUS);
+    const alex = await loginAs(ALEX);
+    const sofia = await loginAs(SOFIA);
+    const [byAlex, byPurchaser, commission] = [
+      await createDraft(marcus.token, 'CF-1'), await createDraft(marcus.token, 'CF-2'), await createDraft(marcus.token, 'CF-3'),
+    ];
+    const db = getTestDb();
+    await db`UPDATE orders SET payment = 'self', paid_by = ${alex.user.id} WHERE id = ${byAlex}`;
+    // The purchaser's own money never passes through the RMB Flow.
+    await db`UPDATE orders SET payment = 'self', paid_by = ${marcus.user.id} WHERE id = ${byPurchaser}`;
+    await db`UPDATE orders SET commission_paid_by = ${sofia.user.id} WHERE id = ${commission}`;
+
+    const read = async () => {
+      const r = await api<ManagerHome>('GET', '/api/home', { token: alex.token });
+      expect(r.status).toBe(200);
+      return r.body.manager.cashFlow;
+    };
+    const ours = (cf: ManagerHome['manager']['cashFlow']) =>
+      cf.items.filter(i => [byAlex, byPurchaser, commission].includes(i.id));
+    let cf = await read();
+    expect(ours(cf)).toEqual([
+      { id: byAlex, kind: 'purchase', payer: 'Alex Chen', mine: true },
+      { id: commission, kind: 'commission', payer: 'Sofia Reyes', mine: false },
+    ]);
+    expect(cf.mine).toBeGreaterThanOrEqual(1);
+
+    // Booked, the cost drops off.
+    const booked = await api('POST', '/api/accounting/entries', {
+      token: alex.token,
+      body: {
+        direction: 'out', kind: 'purchase', amount: 100, currency: 'CNY', method: 'alipay',
+        occurredOn: '2026-10-05', managerId: alex.user.id, targetId: byAlex,
+      },
+    });
+    expect(booked.status).toBe(201);
+    cf = await read();
+    expect(ours(cf).map(i => i.id)).toEqual([commission]);
+
+    // A purchaser's Home carries none of it.
+    const p = await api<PurchaserHome>('GET', '/api/home', { token: marcus.token });
+    expect(p.body.manager).toBeUndefined();
   });
 
   it('reads days in stage from the newest stage move', async () => {
