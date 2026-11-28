@@ -122,6 +122,7 @@ listRoutes.get('/', async (c) => {
   const linkedPaidSel = isManager ? linkedPaidFrag(sql) : sql`NULL`;
   // The RMB book is manager-only too: what it has paid toward the cost.
   const acctCostSel = isManager ? recordedFrag(sql, 'purchase', sql`o.id`) : sql`NULL`;
+  const acctCommissionSel = isManager ? recordedFrag(sql, 'commission', sql`o.id`) : sql`NULL`;
 
   const rows = await sql`
     SELECT
@@ -136,6 +137,7 @@ listRoutes.get('/', async (c) => {
       o.paypal_txn_id,
       ${linkedPaidSel}::float AS linked_paid,
       ${acctCostSel}::float AS acct_paid_cost,
+      ${acctCommissionSel}::float AS acct_paid_commission,
       ${soldFrag} AS sold,
       o.handoff_method,
       mg.id AS manager_id, mg.name AS manager_name,
@@ -234,7 +236,7 @@ listRoutes.get('/', async (c) => {
       paypalTxnId: r.paypal_txn_id,
       // Managers only, and left out rather than nulled: the key alone would
       // name the Payments page it links to.
-      ...(isManager ? { linkedPaid: r.linked_paid, acctPaidCost: r.acct_paid_cost } : {}),
+      ...(isManager ? { linkedPaid: r.linked_paid, acctPaidCost: r.acct_paid_cost, acctPaidCommission: r.acct_paid_commission } : {}),
       // Every line sold, at whatever stage. Managers only, left out otherwise.
       ...(isManager ? { sold: r.sold } : {}),
       handoffMethod: r.handoff_method,

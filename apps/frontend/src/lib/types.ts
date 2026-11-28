@@ -213,6 +213,8 @@ export type OrderSummary = {
   // entries left out. Managers only, absent otherwise and from an older
   // backend; 0 when nothing is booked.
   acctPaidCost?: number | null;
+  // The same for the commission.
+  acctPaidCommission?: number | null;
   warehouse: Warehouse | null;
   qty: number;
   // Priced lines only — an unpriced line contributes no revenue and no margin,

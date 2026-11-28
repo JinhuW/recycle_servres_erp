@@ -4856,6 +4856,7 @@ const zh: Record<string, string> = {
   payLinkOpen: '打开此采购单的付款记录',
   colCostPayment: '成本付款',
   colCommissionPayment: '佣金付款',
+  payerUnbackedHint: '尚无记账流水或银行付款对应此付款——请在记账中登记',
   acctOpenForPo: '在记账中查看此采购单的记录',
   inboundLocal: '本地取货',
   payFocusOrder: '{id} 的付款记录',

@@ -3,6 +3,7 @@ import { I18N } from './i18n';
 import zh from './i18n.zh';
 import { fmtUSD } from './format';
 import {
+  payerUnbacked,
   costPayerLabel, createdEventParts, fieldLabel, inTransitDetail, linePhotoEventDetail, managerChangedLine,
   ownerChangedLine, profitTone, renderValue, signedUSD0, trackingNote,
 } from './orderPresentation';
@@ -190,5 +191,28 @@ describe('trackingNote', () => {
   it('says nothing before the first scan, and on a row from an older backend', () => {
     expect(trackingNote({ status: 'purchased', trackingEta: null }, tt, 'en-US')).toBeNull();
     expect(trackingNote({}, tt, 'en-US')).toBeNull();
+  });
+});
+
+describe('payerUnbacked', () => {
+  const lina = { id: 'u1' };
+  const cost = { payment: 'self' as const, paidBy: lina, linkedPaid: null, acctPaidCost: 0 };
+  it('flags a person-paid cost with no RMB entry and no bank row', () => {
+    expect(payerUnbacked(cost, 'purchase')).toBe(true);
+    expect(payerUnbacked({ ...cost, acctPaidCost: 1450 }, 'purchase')).toBe(false);
+    expect(payerUnbacked({ ...cost, linkedPaid: 400 }, 'purchase')).toBe(false);
+    expect(payerUnbacked({ ...cost, payment: 'company', paidBy: null }, 'purchase')).toBe(false);
+    expect(payerUnbacked({ ...cost, paidBy: null }, 'purchase')).toBe(false);
+  });
+  it('flags a manager-paid commission with no RMB entry', () => {
+    const c = { payment: 'company' as const, commissionPaidBy: { kind: 'manager' as const }, acctPaidCommission: 0 };
+    expect(payerUnbacked(c, 'commission')).toBe(true);
+    expect(payerUnbacked({ ...c, acctPaidCommission: 100 }, 'commission')).toBe(false);
+    expect(payerUnbacked({ ...c, commissionPaidBy: { kind: 'company' as const } }, 'commission')).toBe(false);
+    expect(payerUnbacked({ ...c, commissionPaidBy: null }, 'commission')).toBe(false);
+  });
+  it('never flags for a reader without the figures', () => {
+    expect(payerUnbacked({ ...cost, acctPaidCost: undefined }, 'purchase')).toBe(false);
+    expect(payerUnbacked({ payment: 'self', commissionPaidBy: { kind: 'manager' } }, 'commission')).toBe(false);
   });
 });
