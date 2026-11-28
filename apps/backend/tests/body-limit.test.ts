@@ -100,6 +100,21 @@ describe('global JSON body-size limit', () => {
     }
   });
 
+  it('lets a fleet worker save a browser session over 1 MiB, and only that worker route', async () => {
+    const put = (path: string, size: number) => app.fetch(
+      new Request(`http://test${path}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cookies: [], storage_state: { cookies: [], origins: [{ origin: 'https://www.facebook.com', localStorage: [], indexedDB: [{ blob: 'x'.repeat(size) }] }] } }),
+      }),
+      testEnv,
+    );
+    // No worker token, so a body that clears the cap stops at auth instead.
+    expect((await put('/api/fleet/worker/session', 3 * OVER_1MIB_SIZE)).status).toBe(401);
+    expect((await put('/api/fleet/worker/session', 16 * OVER_1MIB_SIZE)).status).toBe(413);
+    expect((await put('/api/fleet/worker/heartbeat', OVER_1MIB_SIZE)).status).toBe(413);
+  });
+
   it('accepts a POST body under 1 MiB on a JSON route (passes through to route logic)', async () => {
     // A normal-sized login attempt — wrong credentials, but NOT a 413.
     const payload = JSON.stringify({ email: 'nobody@example.com', password: 'wrong' });

@@ -5,6 +5,7 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
+| [RS-621](./RS-621-fleet-worker-session-saves-over-1-mib-are-refused-wi.md) | in-review | bug | P1 | Fleet worker session saves over 1 MiB are refused with 413 | 1.486.1 |
 | [RS-620](./RS-620-home-remind-managers-to-add-cash-flow-for-their-unba.md) | done | feature | P2 | Home: remind managers to add cash flow for their unbacked payments | 1.486.0 |
 | [RS-619](./RS-619-po-list-flag-a-payer-chip-that-no-cash-flow-or-bank.md) | done | feature | P2 | PO list: flag a payer chip that no cash flow or bank link backs | 1.485.0 |
 | [RS-618](./RS-618-po-list-cost-and-commission-payment-chips-link-to-ac.md) | done | feature | P2 | PO list: cost and commission payment chips link to Accounting | 1.484.0 |
