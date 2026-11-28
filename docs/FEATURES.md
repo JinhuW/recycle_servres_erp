@@ -893,6 +893,13 @@ A purchaser can drag only their own Draft.
   that opens the PO's rows on Payments. The column ids stayed `payment` and
   `commission`, so saved column lists still work. The old Paid by column
   below has been folded into Commission payment.
+  Since v1.485.0 (RS-619), a manager's chip shows a small amber **?** when
+  it names a person but nothing backs the payment: a cost whose *Paid by* is
+  a person, with no RMB Flow entry and no bank row linked, or a commission
+  paid by a manager with no commission entry. The tooltip says to record it
+  in Accounting, and the chip itself opens there. The Business Account, the
+  legacy *Self-paid*, and *Not recorded* never get one. The list sends
+  `acctPaidCommission` beside `acctPaidCost` for this.
 - **The cost's Paid by names who paid the supplier** (v1.317.0): the
   **Business Account** — the company's Mercury and PayPal money, the only
   kind the Payments page links to a PO — or **a person**, any active manager
