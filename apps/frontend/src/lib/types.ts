@@ -579,6 +579,12 @@ export type ManagerHome = {
   signoffs: { count: number; items: { id: string; customer: string; status: string }[] };
   bank: { unlinked: number; unlinkedAmount: number; disputes: number };
   rmb: { forMe: number; asked: number };
+  // Payments a manager made by hand that no RMB Flow entry or bank row backs.
+  // Optional for deploy skew: an older backend sends none.
+  cashFlow?: {
+    count: number; mine: number;
+    items: { id: string; kind: 'purchase' | 'commission'; payer: string; mine: boolean }[];
+  };
   queues: { afterSales: number; afterSalesMine: number; transfers: number; web: number };
 };
 

@@ -1012,6 +1012,11 @@ export const I18N: Partial<Record<Lang, Record<string, string>>> = {
     payLinkOpen: "Open this PO's payments",
     colCostPayment: 'Cost payment',
     colCommissionPayment: 'Commission payment',
+    homeCashFlowN: '{n} manager payments with no cash flow · {mine} yours to add',
+    homeCashFlowNOne: '1 manager payment with no cash flow · {mine} yours to add',
+    homeCashFlowCost: 'Cost',
+    homeCashFlowCommission: 'Commission',
+    homeTileCashFlow: 'Cash flow to add',
     payerUnbackedHint: 'No cash flow or bank payment backs this yet — record it in Accounting',
     acctOpenForPo: "Open this PO's entries in Accounting",
     // The bank's net paid against the PO's goods + fees, warned of in Review

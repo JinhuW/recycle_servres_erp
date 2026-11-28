@@ -177,6 +177,10 @@ function ManagerRows({ m }: { m: ManagerHome }) {
       <div className="ph-section-h"><span>{t('homeMoney')}</span></div>
       <Row icon="dollar" title={t('homeReadyToPayN', { n: m.readyToPay.count })} value={fmtUSD0(m.readyToPay.commission, locale)} />
       <Row icon="cash" title={t('homeUnlinkedN', { n: m.bank.unlinked })} value={fmtUSD0(m.bank.unlinkedAmount, locale)} />
+      {m.cashFlow && m.cashFlow.count > 0 && (
+        <LinkRow to="/accounting" icon="alert" title={t('homeCashFlowN', { n: m.cashFlow.count, mine: m.cashFlow.mine })}
+                 sub={m.cashFlow.items.map(c => c.id).join(' · ')} badge={m.cashFlow.mine || undefined} />
+      )}
       <Row icon="clock" title={t('homeAwaitingPaymentN', { n: m.sales.awaitingPayment })} />
       <Row icon="note" title={t('homeSellDraftsN', { n: m.sales.draft })} sub={t('homePackingN', { n: m.sales.packing })} />
       <Row icon="refresh" title={t('homeAfterSalesN', { n: m.queues.afterSales, mine: m.queues.afterSalesMine })} />

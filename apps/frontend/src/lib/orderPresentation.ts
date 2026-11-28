@@ -196,13 +196,13 @@ export function costPayerLabel(
 }
 
 /**
- * Whether a payment names a person but nothing backs it: no RMB Flow entry and
+ * Whether a payment names a manager but nothing backs it: no RMB Flow entry and
  * no bank row linked. Only a manager's list carries the figures, so a reader
  * without them (undefined) is never told.
  */
 export function payerUnbacked(
   o: {
-    payment: 'company' | 'self'; paidBy?: { id: string } | null; linkedPaid?: number | null;
+    userId: string; payment: 'company' | 'self'; paidBy?: { id: string } | null; linkedPaid?: number | null;
     acctPaidCost?: number | null; acctPaidCommission?: number | null;
     commissionPaidBy?: { kind: 'manager' | 'company' } | null;
   },
@@ -210,7 +210,10 @@ export function payerUnbacked(
 ): boolean {
   if (kind === 'purchase') {
     if (o.acctPaidCost === undefined) return false;
-    return o.payment === 'self' && !!o.paidBy && o.linkedPaid == null && !o.acctPaidCost;
+    // A cost's payer is a manager or the PO's own purchaser; only a manager's
+    // money passes through the RMB Flow.
+    return o.payment === 'self' && !!o.paidBy && o.paidBy.id !== o.userId
+      && o.linkedPaid == null && !o.acctPaidCost;
   }
   if (o.acctPaidCommission === undefined) return false;
   return o.commissionPaidBy?.kind === 'manager' && !o.acctPaidCommission;

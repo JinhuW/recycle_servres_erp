@@ -4,12 +4,12 @@ import { getDb } from '../db';
 import { allLimited } from '../lib/concurrency';
 import { effectiveRole } from '../lib/role';
 import { poRealizedLateral } from '../lib/po-cost';
-import { openRowFrag } from '../banktx/match';
+import { commissionLinkedFrag, linkedPaidFrag, openRowFrag } from '../banktx/match';
 import { leaveDraftBlockers, readCutoffs } from '../services/orderTxnRule';
 import { fingerprintSql } from '../services/sellOrderSignoff';
 import { stageSinceSql, unackedRevertFrag } from './orders/shared';
 import { inboundCounts } from './packages';
-import { reviewCounts } from './accounting';
+import { recordedFrag, reviewCounts } from './accounting';
 import type { Env, User } from '../types';
 
 // Home: what is waiting on the viewer, one request for the whole page. Every
@@ -154,7 +154,7 @@ async function managerHome(sql: Sql, u: User) {
 
   const [
     inbound, inboundExtra, inboundRows, reviewRows, revertRows, ready,
-    sellRows, packingRows, signoffRows, bank, rmb, queues,
+    sellRows, packingRows, signoffRows, bank, rmb, queues, cashFlowRows,
   ] = await allLimited([
     () => inboundCounts(sql, u, false),
     () => sql<{ arriving: number; pickups: number }[]>`
@@ -246,6 +246,7 @@ async function managerHome(sql: Sql, u: User) {
          WHERE a.status NOT IN ('Resolved', 'Cancelled') AND a.assignee_id = ${u.id})::int AS after_sales_mine,
         (SELECT COUNT(*) FROM transfer_orders t WHERE t.status = 'Pending')::int AS transfers,
         (SELECT COUNT(*) FROM web_submissions w WHERE w.status = 'new')::int AS web`,
+    () => unbackedPayments(sql, u),
   ]);
 
   const so = Object.fromEntries(sellRows.map(r => [r.status, r])) as Record<string, { n: number; connector: number }>;
@@ -275,10 +276,39 @@ async function managerHome(sql: Sql, u: User) {
     signoffs: { count: signoffRows.length, items: signoffRows.slice(0, LIST_MAX) },
     bank: { unlinked: b.unlinked, unlinkedAmount: b.unlinked_amount, disputes: b.disputes },
     rmb,
+    cashFlow: {
+      count: cashFlowRows.length,
+      mine: cashFlowRows.filter(r => r.mine).length,
+      items: cashFlowRows.slice(0, LIST_MAX).map(({ id, kind, payer, mine }) => ({ id, kind, payer, mine })),
+    },
     queues: {
       afterSales: q.after_sales, afterSalesMine: q.after_sales_mine, transfers: q.transfers, web: q.web,
     },
   };
+}
+
+// Money a manager paid by hand, on the PO, that the RMB Flow has no entry for
+// and no bank row backs: the cost of a self-paid PO whose payer is not its
+// purchaser, or a commission a manager paid. The PO list marks the same rows
+// with a ?; the manager who paid is the one to book it, so theirs come first.
+function unbackedPayments(sql: Sql, u: User) {
+  return sql<{ id: string; kind: 'purchase' | 'commission'; payer: string; mine: boolean }[]>`
+    SELECT * FROM (
+      SELECT o.id, 'purchase' AS kind, pb.name AS payer, (o.paid_by = ${u.id}) AS mine, o.created_at
+      FROM orders o
+      JOIN users pb ON pb.id = o.paid_by
+      WHERE o.archived_at IS NULL AND o.payment = 'self' AND o.paid_by <> o.user_id
+        AND ${linkedPaidFrag(sql)} IS NULL
+        AND ${recordedFrag(sql, 'purchase', sql`o.id`)} = 0
+      UNION ALL
+      SELECT o.id, 'commission' AS kind, cpb.name AS payer, (o.commission_paid_by = ${u.id}) AS mine, o.created_at
+      FROM orders o
+      JOIN users cpb ON cpb.id = o.commission_paid_by
+      WHERE o.archived_at IS NULL AND NOT o.commission_paid_by_company
+        AND NOT ${commissionLinkedFrag(sql)}
+        AND ${recordedFrag(sql, 'commission', sql`o.id`)} = 0
+    ) x
+    ORDER BY mine DESC, created_at ASC, id, kind`;
 }
 
 export default home;
