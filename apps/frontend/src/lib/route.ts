@@ -587,6 +587,12 @@ export function paymentsForOrderPath(orderId: string, txnId?: string): string {
   return txnId ? `${base}?txn=${encodeURIComponent(txnId)}` : base;
 }
 
+// The Accounting book filtered to one PO's entries of one kind, all dates.
+// The page reads both back with takeHashParam.
+export function accountingForOrderPath(orderId: string, kind: 'purchase' | 'commission'): string {
+  return `/accounting?po=${encodeURIComponent(orderId)}&kind=${kind}`;
+}
+
 // The same page pinned to a sell order's payments, read back with
 // match('/payments/so/:id').
 export function paymentsForSellOrderPath(sellOrderId: string, txnId?: string): string {

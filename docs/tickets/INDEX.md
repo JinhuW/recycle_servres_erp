@@ -5,7 +5,11 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-616](./RS-616-paypal-payments-refused-as-transfers-when-linking-to.md) | done | bug | P1 | PayPal payments refused as transfers when linking to a PO | — |
+| [RS-620](./RS-620-home-remind-managers-to-add-cash-flow-for-their-unba.md) | done | feature | P2 | Home: remind managers to add cash flow for their unbacked payments | 1.486.0 |
+| [RS-619](./RS-619-po-list-flag-a-payer-chip-that-no-cash-flow-or-bank.md) | done | feature | P2 | PO list: flag a payer chip that no cash flow or bank link backs | 1.485.0 |
+| [RS-618](./RS-618-po-list-cost-and-commission-payment-chips-link-to-ac.md) | done | feature | P2 | PO list: cost and commission payment chips link to Accounting | 1.484.0 |
+| [RS-617](./RS-617-label-printer-connected-in-one-tab-can-t-be-used-fro.md) | done | bug | P2 | Label printer connected in one tab can't be used from another | 1.483.0 |
+| [RS-616](./RS-616-paypal-payments-refused-as-transfers-when-linking-to.md) | done | bug | P1 | PayPal payments refused as transfers when linking to a PO | 1.482.1 |
 | [RS-615](./RS-615-expose-performance-as-prometheus-metrics-instead-of.md) | done | story | P2 | Expose performance as Prometheus metrics instead of in the ERP | 1.482.0 |
 | [RS-614](./RS-614-reddit-evaluation-stall-alert-threshold-set-in-the-e.md) | done | story | P2 | Reddit evaluation stall alert, threshold set in the ERP | 1.481.0 |
 | [RS-613](./RS-613-send-selected-inventory-lots-to-ebay.md) | done | task | P2 | Send selected Inventory lots to eBay | 1.480.0 |

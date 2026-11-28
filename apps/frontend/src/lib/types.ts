@@ -209,6 +209,12 @@ export type OrderSummary = {
   // for a non-manager. Either way there is no link to draw and no payment gap
   // to warn of. Optional for the same deploy-skew reason as `txnRequired`.
   linkedPaid?: number | null;
+  // What the RMB book has paid toward the cost, net, in CNY: the voided
+  // entries left out. Managers only, absent otherwise and from an older
+  // backend; 0 when nothing is booked.
+  acctPaidCost?: number | null;
+  // The same for the commission.
+  acctPaidCommission?: number | null;
   warehouse: Warehouse | null;
   qty: number;
   // Priced lines only — an unpriced line contributes no revenue and no margin,
@@ -573,6 +579,12 @@ export type ManagerHome = {
   signoffs: { count: number; items: { id: string; customer: string; status: string }[] };
   bank: { unlinked: number; unlinkedAmount: number; disputes: number };
   rmb: { forMe: number; asked: number };
+  // Payments a manager made by hand that no RMB Flow entry or bank row backs.
+  // Optional for deploy skew: an older backend sends none.
+  cashFlow?: {
+    count: number; mine: number;
+    items: { id: string; kind: 'purchase' | 'commission'; payer: string; mine: boolean }[];
+  };
   queues: { afterSales: number; afterSalesMine: number; transfers: number; web: number };
 };
 

@@ -208,13 +208,171 @@ function inTurn<T>(op: () => Promise<T>): Promise<T> {
   return run;
 }
 
+const notify = () => listeners.forEach(l => l());
+
 function set(next: Partial<PrinterStatus>) {
   status = { ...status, ...next };
-  listeners.forEach(l => l());
+  notify();
+  if (owner) post({ t: 'status', from: self, status });
 }
 
 const UNSUPPORTED: PrinterStatus = { state: 'unsupported', name: null, language: 'tspl', paper: null };
-const snapshot = () => (bluetooth() ? status : UNSUPPORTED);
+const snapshot = () => (!bluetooth() ? UNSUPPORTED : !owner && remote ? remote.status : status);
+
+// ── Across tabs ──────────────────────────────────────────────────────────────
+// A label printer takes one connection, and while it has one it stops
+// advertising: another tab finds it neither in the chooser nor by waiting for
+// it, and two tabs writing at once would interleave their jobs. So one tab owns
+// the printer, the one holding the lock, and only it speaks Bluetooth. The
+// others show its status and hand it their labels and checks over a channel.
+// When the owner closes or lets go, the next tab waiting on the lock connects.
+// Without the locks API every tab owns its own, as before.
+const LOCK = 'rs.labelPrinter';
+const self = Math.random().toString(36).slice(2);
+let owner = !navigatorLocks();
+let release: (() => void) | null = null;
+let holds = 0;
+let queued: AbortController | null = null;
+// The owning tab, as it last said.
+let remote: { from: string; status: PrinterStatus } | null = null;
+
+type Req = { op: 'print'; job: Uint8Array } | { op: 'check'; lang: PrinterLanguage } | { op: 'disconnect' };
+type Msg =
+  | { t: 'hello' }
+  | { t: 'status'; from: string; status: PrinterStatus }
+  | { t: 'gone'; from: string }
+  | ({ t: 'req'; id: string; to: string } & Req)
+  | { t: 'res'; id: string; ok: true; value: unknown }
+  | { t: 'res'; id: string; ok: false; error: string };
+
+const pending = new Map<string, { to: string; resolve: (v: unknown) => void; reject: (e: Error) => void }>();
+let asked = 0;
+let channel: BroadcastChannel | null | undefined;
+
+function navigatorLocks(): LockManager | undefined {
+  return typeof navigator === 'undefined' ? undefined : navigator.locks;
+}
+
+function bus(): BroadcastChannel | null {
+  if (channel !== undefined) return channel;
+  channel = typeof BroadcastChannel === 'undefined' ? null : new BroadcastChannel(LOCK);
+  if (!channel) return null;
+  channel.addEventListener('message', e => void hear((e as MessageEvent<Msg>).data));
+  channel.postMessage({ t: 'hello' } satisfies Msg);
+  // The lock goes with the tab anyway; this just tells the others sooner.
+  if (typeof window !== 'undefined') {
+    window.addEventListener('pagehide', () => { if (owner) post({ t: 'gone', from: self }); });
+  }
+  return channel;
+}
+
+function post(m: Msg) {
+  bus()?.postMessage(m);
+}
+
+// Requests sent to a tab that stopped owning can't be answered.
+function failPending(to: string) {
+  for (const [id, p] of pending) {
+    if (p.to !== to) continue;
+    pending.delete(id);
+    p.reject(new Error('disconnected'));
+  }
+}
+
+function ask(req: Req): Promise<unknown> {
+  const to = remote!.from;
+  const id = `${self}:${++asked}`;
+  return new Promise((resolve, reject) => {
+    pending.set(id, { to, resolve, reject });
+    post({ t: 'req', id, to, ...req });
+  });
+}
+
+async function hear(m: Msg): Promise<void> {
+  switch (m.t) {
+    case 'hello':
+      if (owner) post({ t: 'status', from: self, status });
+      return;
+    case 'status':
+      if (owner) return;
+      if (remote && remote.from !== m.from) failPending(remote.from);
+      remote = { from: m.from, status: m.status };
+      notify();
+      // Waits on the lock, to take over if the owner closes.
+      if (m.status.state !== 'off') void labelPrinter.resume();
+      return;
+    case 'gone':
+      if (remote?.from !== m.from) return;
+      failPending(m.from);
+      remote = null;
+      notify();
+      return;
+    case 'req': {
+      if (m.to !== self) return;
+      try {
+        if (!owner) throw new Error('disconnected');
+        const value = m.op === 'print' ? await printHere(m.job)
+          : m.op === 'check' ? await checkHere(m.lang)
+          : forget();
+        post({ t: 'res', id: m.id, ok: true, value: value ?? null });
+      } catch (e) {
+        post({ t: 'res', id: m.id, ok: false, error: e instanceof Error ? e.message : String(e) });
+      }
+      return;
+    }
+    case 'res': {
+      const p = pending.get(m.id);
+      if (!p) return;
+      pending.delete(m.id);
+      if (m.ok) p.resolve(m.value);
+      else p.reject(new Error(m.error));
+    }
+  }
+}
+
+// Resolves once this tab holds the lock, or false if it stopped waiting.
+function hold(options: LockOptions): Promise<boolean> {
+  const locks = navigatorLocks();
+  if (!locks) return Promise.resolve(true);
+  bus();
+  const mine = ++holds;
+  return new Promise(resolve => {
+    let got = false;
+    locks.request(LOCK, options, () => {
+      got = true;
+      owner = true;
+      if (remote) { failPending(remote.from); remote = null; }
+      resolve(true);
+      return new Promise<void>(r => { release = r; });
+    }).catch(() => {
+      if (!got) resolve(false);
+      else if (mine === holds && owner) stepDown();
+    });
+  });
+}
+
+// Another tab took the printer: this one lets its connection go and follows.
+function stepDown() {
+  owner = false;
+  release = null;
+  link = null;
+  take(null);
+  status = { ...status, state: 'off', name: null, paper: null };
+  notify();
+  post({ t: 'hello' });
+}
+
+function relinquish() {
+  if (!navigatorLocks() || !owner) return;
+  owner = false;
+  post({ t: 'gone', from: self });
+  release?.();
+  release = null;
+}
+
+const remembered = (): string | null => {
+  try { return localStorage.getItem(DEVICE_KEY); } catch { return null; /* private window */ }
+};
 
 // Starts a turn for `device`, ending any wait for another printer.
 function take(device: Device | null): number {
@@ -313,6 +471,7 @@ function forget() {
   take(null);
   try { localStorage.removeItem(DEVICE_KEY); } catch { /* private window */ }
   set({ state: 'off', name: null, paper: null });
+  relinquish();
 }
 
 async function send(bytes: Uint8Array): Promise<void> {
@@ -331,16 +490,62 @@ async function send(bytes: Uint8Array): Promise<void> {
   }
 }
 
+// Asks the printer how it is; null when its language can't ask, it has no
+// way to answer, or it doesn't within a second.
+function checkHere(lang: PrinterLanguage): Promise<PaperState | null> {
+  return inTurn(async () => {
+    const query = STATUS_QUERY[lang];
+    if (!link?.notify || !query || status.state !== 'on') return null;
+    const answer = new Promise<number | null>(resolve => {
+      reply = resolve;
+      setTimeout(() => resolve(null), 1000);
+    });
+    let byte: number | null;
+    try {
+      await send(query);
+      byte = await answer;
+    } finally {
+      reply = null;
+    }
+    const paper = byte === null ? null : readStatus(lang, byte);
+    set({ paper });
+    return paper;
+  });
+}
+
+function printHere(job: Uint8Array): Promise<void> {
+  return inTurn(async () => {
+    // Disconnected while the job waited its turn.
+    if (!link) throw new Error('disconnected');
+    set({ state: 'printing' });
+    try {
+      await send(job);
+    } finally {
+      if (link) set({ state: 'on' });
+    }
+  });
+}
+
+// Another tab owns the printer, and this one goes through it.
+const following = () => !owner && remote !== null;
+
 export const labelPrinter = {
-  subscribe(l: () => void) { listeners.add(l); return () => { listeners.delete(l); }; },
+  subscribe(l: () => void) {
+    bus();
+    listeners.add(l);
+    return () => { listeners.delete(l); };
+  },
 
   // As it is now, for a print that waited its turn.
   status: snapshot,
 
-  // Needs a click: Chrome opens its device chooser only from one.
+  // Needs a click: Chrome opens its device chooser only from one. A printer
+  // another tab has on is on here too.
   async connect(): Promise<void> {
     const bt = bluetooth();
     if (!bt || link) return;
+    const there = following() ? remote!.status.state : 'off';
+    if (there === 'on' || there === 'printing' || there === 'connecting') return;
     let device: Device;
     try {
       device = await bt.requestDevice({ acceptAllDevices: true, optionalServices: PRINTER_SERVICES });
@@ -348,24 +553,43 @@ export const labelPrinter = {
       // The packer closed the chooser. A wait for the last printer carries on.
       return;
     }
+    if (!owner) {
+      // Takes the printer from a tab still waiting for it.
+      queued?.abort();
+      queued = null;
+      await hold({ steal: true });
+    }
     const mine = take(device);
     set({ state: 'connecting', name: device.name ?? null, paper: null });
     try {
       await open(device, mine);
     } catch (e) {
-      set({ state: 'off', name: null });
+      if (mine === turn) {
+        set({ state: 'off', name: null });
+        relinquish();
+      }
       throw e;
     }
   },
 
   // A printer this browser was allowed before, waited for without the chooser.
+  // While another tab owns it, this waits for that tab to let it go.
   async resume(): Promise<void> {
     const bt = bluetooth();
-    if (!bt?.getDevices || link || status.state !== 'off') return;
-    let id: string | null = null;
-    try { id = localStorage.getItem(DEVICE_KEY); } catch { /* private window */ }
+    if (!bt?.getDevices || queued || link || (owner && status.state !== 'off') || !remembered()) return;
+    if (!owner) {
+      const q = new AbortController();
+      queued = q;
+      const got = await hold({ signal: q.signal });
+      if (queued === q) queued = null;
+      if (!got) return;
+      // The owner's Disconnect forgot the printer before letting go.
+      if (link || status.state !== 'off') return;
+    }
+    const id = remembered();
     const device = id ? (await bt.getDevices()).find(d => d.id === id) : undefined;
     if (device) void reconnect(device);
+    else relinquish();
   },
 
   // Without getDevices, which Chrome keeps behind
@@ -373,7 +597,10 @@ export const labelPrinter = {
   // forgets the printer.
   canResume: () => !!bluetooth()?.getDevices,
 
-  disconnect: forget,
+  disconnect(): void {
+    if (following()) void ask({ op: 'disconnect' }).catch(() => {});
+    else forget();
+  },
 
   // Once a connect under way has finished or failed.
   settled(): Promise<PrinterStatus> {
@@ -389,40 +616,12 @@ export const labelPrinter = {
     });
   },
 
-  // Asks the printer how it is; null when its language can't ask, it has no
-  // way to answer, or it doesn't within a second.
   check(lang: PrinterLanguage): Promise<PaperState | null> {
-    return inTurn(async () => {
-      const query = STATUS_QUERY[lang];
-      if (!link?.notify || !query || status.state !== 'on') return null;
-      const answer = new Promise<number | null>(resolve => {
-        reply = resolve;
-        setTimeout(() => resolve(null), 1000);
-      });
-      let byte: number | null;
-      try {
-        await send(query);
-        byte = await answer;
-      } finally {
-        reply = null;
-      }
-      const paper = byte === null ? null : readStatus(lang, byte);
-      set({ paper });
-      return paper;
-    });
+    return following() ? ask({ op: 'check', lang }) as Promise<PaperState | null> : checkHere(lang);
   },
 
   print(job: Uint8Array): Promise<void> {
-    return inTurn(async () => {
-      // Disconnected while the job waited its turn.
-      if (!link) throw new Error('disconnected');
-      set({ state: 'printing' });
-      try {
-        await send(job);
-      } finally {
-        if (link) set({ state: 'on' });
-      }
-    });
+    return following() ? ask({ op: 'print', job }).then(() => {}) : printHere(job);
   },
 };
 

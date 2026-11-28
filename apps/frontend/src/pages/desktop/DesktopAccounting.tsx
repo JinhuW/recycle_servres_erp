@@ -13,7 +13,7 @@ import { handleFetchError } from '../../lib/errorToast';
 import { fmtMoney } from '../../lib/format';
 import { forEachKeysetPage } from '../../lib/keysetPages';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
-import { accountingEntryPath, matchAccountingEntry, navigate, useRoute } from '../../lib/route';
+import { accountingEntryPath, matchAccountingEntry, navigate, takeHashParam, useRoute } from '../../lib/route';
 import {
   acctEntries, acctSummary, fmtBookDay, fmtCny, localToday, markDayStarts, useAcctReviewCount,
   type AcctRow, type AcctSummary,
@@ -29,6 +29,9 @@ type Props = { onToast?: (msg: string, kind?: 'success' | 'error') => void };
 // The owner asked for the page to open on Oct 31, 2026 rather than the month
 // so far; earlier entries still make up the Opening balance.
 const DEFAULT_FROM = '2026-10-31';
+// Before the book's first entry, so "all" misses nothing without waiting
+// for the summary to say where the book starts.
+const ALL_FROM = '2020-01-01';
 
 // The managers' RMB book. The period and the manager are the book's scope;
 // the band states it (opening + received − paid = closing) and the table is
@@ -52,6 +55,18 @@ export function DesktopAccounting({ onToast }: Props) {
   const [search, setSearch] = usePersisted('desktop.acct.search', '');
   const q = useDebouncedValue(search.trim(), 250);
   const [showVoided, setShowVoided] = usePersisted('desktop.acct.voided', false);
+  // Arriving from a PO's payment chip: that PO's entries of that kind, all
+  // dates, with nothing else on screen that could hide one.
+  useEffect(() => {
+    const po = takeHashParam('po');
+    const k = takeHashParam('kind');
+    if (!po) return;
+    setSearch(po);
+    setKind(ACCOUNTING_KINDS.includes(k as AccountingKind) ? k as AccountingKind : '');
+    setRange({ from: ALL_FROM, to: today, preset: 'all' });
+    setManagerId(''); setDirection(''); setMethod(''); setReview('');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [summary, setSummary] = useState<AcctSummary | null>(null);
   const [rows, setRows] = useState<AcctRow[]>([]);
   const [loaded, setLoaded] = useState(false);

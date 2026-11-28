@@ -10,12 +10,12 @@ import { forEachKeysetPage } from '../../lib/keysetPages';
 import { api } from '../../lib/api';
 import { handleFetchError } from '../../lib/errorToast';
 import { shareOrCopy } from '../../lib/shareOrCopy';
-import { paymentsForOrderPath, takeHashParam } from '../../lib/route';
+import { accountingForOrderPath, paymentsForOrderPath, takeHashParam } from '../../lib/route';
 import { paymentGap } from '../../lib/paymentGap';
 import { RouteLink } from '../../components/RouteLink';
 import { fmtUSD0, fmtUSD, fmtDateShort, fmt0 } from '../../lib/format';
 import { lineSpecLabel } from '../../lib/lineGroups';
-import { costPayerLabel, inTransitDetail, profitTone, trackingNote } from '../../lib/orderPresentation';
+import { costPayerLabel, inTransitDetail, payerUnbacked, profitTone, trackingNote } from '../../lib/orderPresentation';
 import { statusTone, isCompleted, LIFECYCLE_STATUS, SOLD_LABEL, WORKFLOW_STAGES } from '../../lib/status';
 import { categoryFilterOptions } from '../../lib/lookups';
 import { BUSINESS_ACCOUNT, NO_WAREHOUSE, facetCounts, matchesPayment, matchesWarehouse, payerOptions, paymentPickOrAll, warehouseOptions } from '../../lib/poFacets';
@@ -26,6 +26,7 @@ import { OrderCategoryChips } from '../../components/OrderCategoryChips';
 import { SoldBadge } from '../../components/SoldBadge';
 import { PaymentGapMark } from '../../components/PaymentMismatch';
 import { paidByLabel, paidByLocked } from '../../lib/useCommissionPaidBy';
+import { fmtCny } from '../../lib/accounting';
 import { PoBoard } from './order/PoBoard';
 import { useReviewModeEntry } from './ReviewModeEntry';
 
@@ -59,12 +60,11 @@ const TOGGLEABLE_COLS = [
   { id: 'lines',      tKey: 'lines' },
   { id: 'qty',        tKey: 'qty' },
   { id: 'cost',       tKey: 'totalCost' },
+  { id: 'payment',    tKey: 'colCostPayment' },
   { id: 'revenue',    tKey: 'revenue' },
   { id: 'profit',     tKey: 'profit' },
   { id: 'realized',   tKey: 'realizedProfit' },
-  { id: 'commission', tKey: 'commission' },
-  { id: 'paidBy',     tKey: 'cpPaidByLabel' },
-  { id: 'payment',    tKey: 'payment' },
+  { id: 'commission', tKey: 'colCommissionPayment' },
   { id: 'status',     tKey: 'status' },
 ] as const;
 type ColId = typeof TOGGLEABLE_COLS[number]['id'];
@@ -87,9 +87,7 @@ const SORT_KEYS: Record<string, (o: OrderSummary) => string | number> = {
   // Unsold POs sort below every realized figure, loss or gain.
   realized:   o => o.realized?.profit ?? Number.NEGATIVE_INFINITY,
   commission: o => commissionFor(o),
-  // Sorts by what the cell reads; the business sorts among the B's.
-  paidBy:     o => !o.commissionPaidBy ? '' : o.commissionPaidBy.kind === 'company' ? 'Business Account' : o.commissionPaidBy.name,
-  // The payer the chip names, the same way.
+  // The payer the chip names; the business sorts among the B's.
   payment:    o => (o.payment === 'company' ? 'Business' : o.paidBy?.name ?? 'Self-paid'),
   status:     o => o.status,
 };
@@ -98,22 +96,51 @@ type Props = {
   onToast?: (msg: string, kind?: 'success' | 'error') => void;
 };
 
-// Who paid the purchaser their commission, read-only: the PO page records it,
-// from the commission screenshot's upload or a confirmed pick. A linked bank
-// payment settles it as the company's, so a manager's cell opens that payment,
-// as the Payment chip beside it does.
-function PaidByCell({ order, isManager }: { order: OrderSummary; isManager: boolean }) {
+// A payment as one chip, payer | amount. For a manager it opens the PO's
+// entries of that kind in Accounting; a bank-paid one keeps a second link to
+// the bank rows on Payments. The row's own click toggles the line drawer,
+// hence the stop.
+function PaymentChip({ order, kind, payer, amount, bankLinked, isManager }: {
+  order: OrderSummary; kind: 'purchase' | 'commission'; payer: string; amount: string | null;
+  bankLinked: boolean; isManager: boolean;
+}) {
   const { t } = useT();
-  const paidBy = order.commissionPaidBy ?? null;
-  const label = paidByLabel(paidBy, t);
-  if (isManager && paidByLocked(paidBy)) {
-    return (
-      <RouteLink to={paymentsForOrderPath(order.id)} className="chip chip-link" title={t('cpPaidByLinkedHint')}>
-        {label}
+  const text = amount ? `${payer} | ${amount}` : payer;
+  if (!isManager) return <span className="chip" style={{ whiteSpace: 'nowrap' }}>{text}</span>;
+  // A person is named, but neither the RMB Flow nor a bank row says they paid.
+  const unbacked = payerUnbacked(order, kind);
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}
+          onClick={e => e.stopPropagation()}>
+      <RouteLink to={accountingForOrderPath(order.id, kind)} className="chip chip-link" title={t('acctOpenForPo')}>
+        {text}
+        {unbacked && (
+          <span
+            title={t('payerUnbackedHint')} aria-label={t('payerUnbackedHint')}
+            style={{
+              display: 'inline-grid', placeItems: 'center', width: 14, height: 14, marginLeft: 5,
+              borderRadius: '50%', background: 'var(--warn-soft)', color: 'var(--warn-strong)',
+              fontSize: 10, fontWeight: 700, lineHeight: 1,
+            }}
+          >?</span>
+        )}
       </RouteLink>
-    );
-  }
-  return <span className={paidBy ? undefined : 'muted'} style={{ whiteSpace: 'nowrap' }}>{label}</span>;
+      {bankLinked && (
+        <RouteLink to={paymentsForOrderPath(order.id)} title={t('payLinkOpen')}
+                   aria-label={t('payLinkOpen')} style={{ lineHeight: 0, color: 'var(--fg-subtle)' }}>
+          <Icon name="cash" size={13} />
+        </RouteLink>
+      )}
+    </span>
+  );
+}
+
+// What has gone toward the cost: the bank's figure when a payment is linked,
+// else what the RMB book has booked. Managers only; nothing yet reads as none.
+function costPaidText(o: OrderSummary, locale: string): string | null {
+  if (typeof o.linkedPaid === 'number') return fmtUSD0(o.linkedPaid, locale);
+  if (o.acctPaidCost) return fmtCny(o.acctPaidCost, locale);
+  return null;
 }
 
 export function DesktopOrders({ onToast }: Props) {
@@ -636,15 +663,14 @@ export function DesktopOrders({ onToast }: Props) {
                 {isVis('lines') && <SortTh col="lines" sort={sort} onSort={cycleSort} align="right">{t('lines')}</SortTh>}
                 {isVis('qty') && <SortTh col="qty" sort={sort} onSort={cycleSort} align="right">{t('qty')}</SortTh>}
                 {isVis('cost') && <SortTh col="cost" sort={sort} onSort={cycleSort} align="right">{t('totalCost')}</SortTh>}
+                {isVis('payment') && <SortTh col="payment" sort={sort} onSort={cycleSort}>{t('colCostPayment')}</SortTh>}
                 {isVis('revenue') && <SortTh col="revenue" sort={sort} onSort={cycleSort} align="right">{t('revenue')}</SortTh>}
                 {/* One toggle, two columns for a manager: the projection and
                     what the units actually earned. A purchaser has only the
                     projection, so it keeps its plain name. */}
                 {isVis('profit') && <SortTh col="profit" sort={sort} onSort={cycleSort} align="right">{isManager ? t('unrealizedShort') : t('profit')}</SortTh>}
                 {isManager && isVis('realized') && <SortTh col="realized" sort={sort} onSort={cycleSort} align="right">{t('realizedShort')}</SortTh>}
-                {isVis('commission') && <SortTh col="commission" sort={sort} onSort={cycleSort} align="right">{t('commission')}</SortTh>}
-                {isVis('paidBy') && <SortTh col="paidBy" sort={sort} onSort={cycleSort}>{t('cpPaidByLabel')}</SortTh>}
-                {isVis('payment') && <SortTh col="payment" sort={sort} onSort={cycleSort}>{t('payment')}</SortTh>}
+                {isVis('commission') && <SortTh col="commission" sort={sort} onSort={cycleSort}>{t('colCommissionPayment')}</SortTh>}
                 {isVis('status') && <SortTh col="status" sort={sort} onSort={cycleSort}>{t('status')}</SortTh>}
                 <th className="col-actions" style={{ width: isManager ? 122 : 90 }}>{t('actions')}</th>
               </tr>
@@ -743,6 +769,14 @@ export function DesktopOrders({ onToast }: Props) {
                           </div>
                         )}
                       </td>
+                      <td style={{ display: isVis('payment') ? undefined : 'none' }}>
+                        <PaymentChip
+                          order={o} kind="purchase" isManager={isManager}
+                          payer={costPayerLabel(o, t, true)}
+                          amount={isManager ? costPaidText(o, locale) : null}
+                          bankLinked={typeof o.linkedPaid === 'number'}
+                        />
+                      </td>
                       <td className="num mono" style={{ display: isVis('revenue') ? undefined : 'none' }}>
                         {fmtUSD0(o.revenue, locale)}
                         {/* Revenue counts priced lines only, so a PO nobody has
@@ -769,21 +803,13 @@ export function DesktopOrders({ onToast }: Props) {
                           )}
                         </td>
                       )}
-                      <td className="num mono" style={{ display: isVis('commission') ? undefined : 'none' }}>{fmtUSD(commission, locale)}</td>
-                      <td style={{ display: isVis('paidBy') ? undefined : 'none' }}>
-                        <PaidByCell order={o} isManager={isManager} />
-                      </td>
-                      <td style={{ display: isVis('payment') ? undefined : 'none' }}>
-                        {/* A PO the bank has paid says so and opens its payment
-                            group; a manager only, since that page is. The row's
-                            own click toggles the line drawer, hence the stop. */}
-                        {isManager && typeof o.linkedPaid === 'number' ? (
-                          <RouteLink to={paymentsForOrderPath(o.id)} className="chip chip-link" title={t('payLinkOpen')}>
-                            {costPayerLabel(o, t, true)} | {fmtUSD0(o.linkedPaid, locale)}
-                          </RouteLink>
-                        ) : (
-                          <span className="chip">{costPayerLabel(o, t, true)}</span>
-                        )}
+                      <td style={{ display: isVis('commission') ? undefined : 'none' }}>
+                        <PaymentChip
+                          order={o} kind="commission" isManager={isManager}
+                          payer={paidByLabel(o.commissionPaidBy ?? null, t)}
+                          amount={fmtUSD(commission, locale)}
+                          bankLinked={paidByLocked(o.commissionPaidBy ?? null)}
+                        />
                       </td>
                       <td style={{ display: isVis('status') ? undefined : 'none' }}>
                         {(() => {

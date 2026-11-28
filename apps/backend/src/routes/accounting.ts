@@ -262,7 +262,7 @@ const LENS_OF: Record<Exclude<AccountingKind, 'other'>, TargetLens> = {
 // What the book has against a record, signed the way the record reads it: a
 // PO and a case are paid, a sell order is received. A sell order's figure
 // takes in its cases' refunds too — that money went back to the same buyer.
-function recordedFrag(sql: SqlLike, lens: TargetLens, idCol: Frag) {
+export function recordedFrag(sql: SqlLike, lens: TargetLens, idCol: Frag) {
   const live = sql`e.voided_at IS NULL`;
   switch (lens) {
     case 'purchase':

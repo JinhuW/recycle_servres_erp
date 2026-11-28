@@ -537,6 +537,20 @@ describe('accounting', () => {
     expect(company.body.error).toMatch(/change that on the PO/);
   });
 
+  it('the PO list carries the cost the book has paid, to managers only, voided entries left out', async () => {
+    const marcus = await loginAs(MARCUS);
+    const self = await draftPO(marcus.token, { payment: 'self' });
+    await recorded(alex.token, base({ kind: 'purchase', targetId: self, managerId: marcus.user.id, amount: 500 }));
+    const voided = await recorded(alex.token, base({ kind: 'purchase', targetId: self, managerId: marcus.user.id, amount: 200 }));
+    expect((await api('POST', `/api/accounting/entries/${voided}/void`, { token: alex.token, body: { reason: 'typo' } })).status).toBe(200);
+    const rowFor = async (token: string) =>
+      (await api<{ orders: { id: string; acctPaidCost?: number | null; acctPaidCommission?: number | null }[] }>(
+        'GET', '/api/orders', { token })).body.orders.find(o => o.id === self)!;
+    expect(await rowFor(alex.token)).toMatchObject({ acctPaidCost: 500, acctPaidCommission: 0 });
+    expect(await rowFor(marcus.token)).not.toHaveProperty('acctPaidCost');
+    expect(await rowFor(marcus.token)).not.toHaveProperty('acctPaidCommission');
+  });
+
   it('a booked cost\'s payment and Paid by are a manager\'s to change', async () => {
     const marcus = await loginAs(MARCUS);
     const sofia = await loginAs(SOFIA);
