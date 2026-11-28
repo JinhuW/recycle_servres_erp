@@ -5,7 +5,8 @@ See [README.md](./README.md) for what the fields mean.
 
 | ID | Status | Type | Pri | Title | Shipped |
 |---|---|---|---|---|---|
-| [RS-619](./RS-619-fleet-worker-session-saves-over-1-mib-are-refused-wi.md) | in-review | bug | P1 | Fleet worker session saves over 1 MiB are refused with 413 | 1.484.1 |
+| [RS-620](./RS-620-fleet-worker-session-saves-over-1-mib-are-refused-wi.md) | in-review | bug | P1 | Fleet worker session saves over 1 MiB are refused with 413 | 1.485.1 |
+| [RS-619](./RS-619-po-list-flag-a-payer-chip-that-no-cash-flow-or-bank.md) | done | feature | P2 | PO list: flag a payer chip that no cash flow or bank link backs | 1.485.0 |
 | [RS-618](./RS-618-po-list-cost-and-commission-payment-chips-link-to-ac.md) | done | feature | P2 | PO list: cost and commission payment chips link to Accounting | 1.484.0 |
 | [RS-617](./RS-617-label-printer-connected-in-one-tab-can-t-be-used-fro.md) | done | bug | P2 | Label printer connected in one tab can't be used from another | 1.483.0 |
 | [RS-616](./RS-616-paypal-payments-refused-as-transfers-when-linking-to.md) | done | bug | P1 | PayPal payments refused as transfers when linking to a PO | 1.482.1 |

@@ -15,7 +15,7 @@ import { paymentGap } from '../../lib/paymentGap';
 import { RouteLink } from '../../components/RouteLink';
 import { fmtUSD0, fmtUSD, fmtDateShort, fmt0 } from '../../lib/format';
 import { lineSpecLabel } from '../../lib/lineGroups';
-import { costPayerLabel, inTransitDetail, profitTone, trackingNote } from '../../lib/orderPresentation';
+import { costPayerLabel, inTransitDetail, payerUnbacked, profitTone, trackingNote } from '../../lib/orderPresentation';
 import { statusTone, isCompleted, LIFECYCLE_STATUS, SOLD_LABEL, WORKFLOW_STAGES } from '../../lib/status';
 import { categoryFilterOptions } from '../../lib/lookups';
 import { BUSINESS_ACCOUNT, NO_WAREHOUSE, facetCounts, matchesPayment, matchesWarehouse, payerOptions, paymentPickOrAll, warehouseOptions } from '../../lib/poFacets';
@@ -107,11 +107,23 @@ function PaymentChip({ order, kind, payer, amount, bankLinked, isManager }: {
   const { t } = useT();
   const text = amount ? `${payer} | ${amount}` : payer;
   if (!isManager) return <span className="chip" style={{ whiteSpace: 'nowrap' }}>{text}</span>;
+  // A person is named, but neither the RMB Flow nor a bank row says they paid.
+  const unbacked = payerUnbacked(order, kind);
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}
           onClick={e => e.stopPropagation()}>
       <RouteLink to={accountingForOrderPath(order.id, kind)} className="chip chip-link" title={t('acctOpenForPo')}>
         {text}
+        {unbacked && (
+          <span
+            title={t('payerUnbackedHint')} aria-label={t('payerUnbackedHint')}
+            style={{
+              display: 'inline-grid', placeItems: 'center', width: 14, height: 14, marginLeft: 5,
+              borderRadius: '50%', background: 'var(--warn-soft)', color: 'var(--warn-strong)',
+              fontSize: 10, fontWeight: 700, lineHeight: 1,
+            }}
+          >?</span>
+        )}
       </RouteLink>
       {bankLinked && (
         <RouteLink to={paymentsForOrderPath(order.id)} title={t('payLinkOpen')}
