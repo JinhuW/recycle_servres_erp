@@ -7,7 +7,7 @@ priority: P1
 created: 2026-11-28
 reporter: nightly-railway-inspection
 branch: fix/fleet-session-body-cap
-pr:
+pr: 1267
 version: 1.484.1
 related: [RS-419]
 ---
