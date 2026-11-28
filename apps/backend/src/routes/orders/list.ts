@@ -3,6 +3,7 @@
 import { Hono } from 'hono';
 import { commissionLinkedFrag, linkedPaidFrag } from '../../banktx/match';
 import { getDb } from '../../db';
+import { recordedFrag } from '../accounting';
 import { clampLimit, cursorTs, cursorTsSelect, decodeCursor, encodeCursor, parseSort } from '../../lib/pagination';
 import { effectiveRole } from '../../lib/role';
 import { LIFECYCLE_LABEL, lifecyclesForLabel } from '../../services/orderAdvance';
@@ -119,6 +120,8 @@ listRoutes.get('/', async (c) => {
 
   // Managers only: the figure and the Payments page it opens are.
   const linkedPaidSel = isManager ? linkedPaidFrag(sql) : sql`NULL`;
+  // The RMB book is manager-only too: what it has paid toward the cost.
+  const acctCostSel = isManager ? recordedFrag(sql, 'purchase', sql`o.id`) : sql`NULL`;
 
   const rows = await sql`
     SELECT
@@ -132,6 +135,7 @@ listRoutes.get('/', async (c) => {
       o.other_fees_note,
       o.paypal_txn_id,
       ${linkedPaidSel}::float AS linked_paid,
+      ${acctCostSel}::float AS acct_paid_cost,
       ${soldFrag} AS sold,
       o.handoff_method,
       mg.id AS manager_id, mg.name AS manager_name,
@@ -230,7 +234,7 @@ listRoutes.get('/', async (c) => {
       paypalTxnId: r.paypal_txn_id,
       // Managers only, and left out rather than nulled: the key alone would
       // name the Payments page it links to.
-      ...(isManager ? { linkedPaid: r.linked_paid } : {}),
+      ...(isManager ? { linkedPaid: r.linked_paid, acctPaidCost: r.acct_paid_cost } : {}),
       // Every line sold, at whatever stage. Managers only, left out otherwise.
       ...(isManager ? { sold: r.sold } : {}),
       handoffMethod: r.handoff_method,
