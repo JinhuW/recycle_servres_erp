@@ -313,6 +313,15 @@ const leadsImportBodyLimit = bodyLimit({
   onError: (c) => c.json({ error: 'Payload too large' }, 413),
 });
 
+// A worker's session save is the browser's whole storage_state, Facebook's
+// IndexedDB included, which outgrows 1 MiB as a session ages. Refused, the
+// account's next boot restores an older session, and that risks a login.
+const FLEET_SESSION_LIMIT = 16 * 1024 * 1024;
+const fleetSessionBodyLimit = bodyLimit({
+  maxSize: FLEET_SESSION_LIMIT,
+  onError: (c) => c.json({ error: 'Payload too large' }, 413),
+});
+
 // A chat photo, from the Facebook extension or the chats page, arrives as the
 // raw body.
 const fbChatMediaBodyLimit = bodyLimit({
@@ -330,6 +339,7 @@ app.use('*', (c, next) => {
   if (c.req.path === '/api/public/intake') return intakeBodyLimit(c, next);
   if (isUploadPath(c.req.path)) return uploadBodyLimit(c, next);
   if (c.req.path === '/api/leads/reddit/import') return leadsImportBodyLimit(c, next);
+  if (c.req.path === '/api/fleet/worker/session') return fleetSessionBodyLimit(c, next);
   if (c.req.path === '/api/fb-chat/push/media' || c.req.path === '/api/fb-chat/media') return fbChatMediaBodyLimit(c, next);
   return jsonBodyLimit(c, next);
 });
